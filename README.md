@@ -4,7 +4,9 @@ pAIcture is a web application designed to transform shared AI conversations into
 
 ## Status
 
-pAIcture is in an early development stage. This repository currently provides only the project foundation; conversation retrieval, parsing, document rendering, and PDF export have not been implemented yet.
+pAIcture is in active early development. The first product version includes the responsive import workspace, platform-aware extraction adapters, conversation preview, light and dark themes, print-ready PDF output, and high-resolution PNG export.
+
+Platform share-page formats and access controls can change without notice. pAIcture reports inaccessible or incomplete imports before export rather than silently dropping content.
 
 ## Planned platforms
 
@@ -21,15 +23,16 @@ pAIcture is in an early development stage. This repository currently provides on
 
 ```text
 pAIcture/
-├── docs/       # Project documentation and future design notes
-├── src/        # Application source code (future)
-├── tests/      # Automated tests (future)
-├── .gitignore
-├── LICENSE
-└── README.md
+├── app/                    # Interface and server routes
+│   └── api/extract/        # Conversation import endpoint
+├── lib/conversation/       # Platform adapters and safe content handling
+├── public/                 # Public brand assets
+├── components/             # Reusable interface primitives
+├── docs/                   # Project documentation
+└── tests/                  # Automated tests
 ```
 
-The implementation stack and architecture are intentionally undecided so they can be selected when product requirements are clearer.
+The application uses a platform-adapter design so future AI providers can be added without changing the main import and export flow.
 
 ## Contributing
 

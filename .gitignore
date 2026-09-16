@@ -5,6 +5,16 @@ node_modules/
 dist/
 build/
 coverage/
+.next/
+.sites-runtime/
+.wrangler/
+.pnpm-store/
+.vinext/
+*.tsbuildinfo
+
+# The Sites build helper is source code, not generated output.
+!build/
+!build/**
 
 # Environment files and local secrets
 .env
