@@ -82,6 +82,36 @@ function messagesFromConversation(conversation: Record<string, unknown>): Extrac
     return role && text.trim() ? [{ id: `message-${index + 1}`, role, html: renderMarkdown(text) } satisfies ExtractedMessage] : [];
   });
 }
+function balancedElementInner(html: string, start: number, tagName: string) {
+  const openingEnd = html.indexOf(">", start);
+  if (openingEnd < 0) return "";
+  const token = new RegExp(`<\\/?${tagName}\\b[^>]*>`, "gi");
+  token.lastIndex = start;
+  let depth = 0;
+  for (let match = token.exec(html); match; match = token.exec(html)) {
+    depth += match[0].startsWith("</") ? -1 : 1;
+    if (depth === 0) return html.slice(openingEnd + 1, match.index);
+  }
+  return "";
+}
+function messagesFromRenderedChatGptHtml(html: string): ExtractedMessage[] {
+  const author = /<div\b[^>]*data-message-author-role=["'](user|assistant)["'][^>]*>/gi;
+  return [...html.matchAll(author)].flatMap((match, index) => {
+    if (match.index === undefined) return [];
+    const role = match[1] as "user" | "assistant";
+    const authorHtml = balancedElementInner(html, match.index, "div");
+    const contentMarker = role === "assistant"
+      ? /<div\b[^>]*class=["'][^"']*\bmarkdown\b[^"']*["'][^>]*>/i
+      : /<div\b[^>]*class=["'][^"']*\bwhitespace-pre-wrap\b[^"']*["'][^>]*>/i;
+    const contentMatch = contentMarker.exec(authorHtml);
+    const content = contentMatch?.index === undefined
+      ? authorHtml.replace(/<button\b[\s\S]*?<\/button>/gi, "")
+      : balancedElementInner(authorHtml, contentMatch.index, "div");
+    let safe = sanitizeHtml(content).trim();
+    if (safe && !/^<(?:p|h[1-4]|ul|ol|blockquote|pre|table|figure)\b/i.test(safe)) safe = `<p>${safe}</p>`;
+    return safe ? [{ id: `message-${index + 1}`, role, html: safe } satisfies ExtractedMessage] : [];
+  });
+}
 type FetchedShare = { html: string; usedReaderFallback: boolean };
 
 async function fetchChatGptShare(url: URL): Promise<FetchedShare> {
@@ -98,6 +128,7 @@ async function fetchChatGptShare(url: URL): Promise<FetchedShare> {
     const readerHeaders = {
       Accept: "text/html",
       "X-Return-Format": "html",
+      "X-Target-Selector": "[data-message-author-role]",
       // The public share URL is immutable enough for an import session. Reusing
       // Reader's cached render avoids burning its anonymous 20 RPM allowance.
       "X-Cache-Tolerance": "86400",
@@ -135,12 +166,11 @@ const chatgpt: ConversationAdapter = {
         if (conversation) break;
       } catch {}
     }
-    if (!conversation) throw new Error("ChatGPT returned the public page, but its embedded conversation payload was missing or used an unsupported format.");
-    const messages = messagesFromConversation(conversation);
+    const messages = conversation ? messagesFromConversation(conversation) : messagesFromRenderedChatGptHtml(html);
     if (!messages.length) throw new Error("ChatGPT returned the conversation metadata, but no user or assistant messages could be decoded.");
     const warnings = ["Interactive canvases and files that require a signed-in ChatGPT session cannot be embedded automatically."];
     if (usedReaderFallback) warnings.push("ChatGPT blocked the hosting network, so this public page was retrieved through Jina Reader before local structured parsing. No screenshot or OCR was used.");
-    return { title: typeof conversation.title === "string" ? conversation.title : titleFromHtml(html, "chatgpt"), platform: "chatgpt", messages, warnings };
+    return { title: conversation && typeof conversation.title === "string" ? conversation.title : titleFromHtml(html, "chatgpt"), platform: "chatgpt", messages, warnings };
   },
 };
 function browserOnlyAdapter(platform: "gemini" | "claude", hosts: string[], detail: string): ConversationAdapter {
