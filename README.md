@@ -14,11 +14,11 @@ Real public share links were tested on September 16, 2026:
 
 | Platform | Browser access | Server extraction | Current result |
 | --- | --- | --- | --- |
-| ChatGPT | Public page opens | The structured hydration payload is parsed directly when server access succeeds; the browser companion handles upstream HTTP 403 responses | Structured preview plus PDF and paginated PNG export |
+| ChatGPT | Public page opens | The structured hydration payload is parsed directly; if ChatGPT blocks the hosting network, the same public page is retrieved as rendered HTML through Jina Reader and parsed locally | Structured preview plus PDF and paginated PNG export |
 | Gemini | Public conversation renders in a browser | The initial HTML does not include the messages; browser-side data loading is required | Clear limitation and future fallback guidance |
 | Claude | Public conversation renders in a browser | The initial HTML does not include the messages; browser-side data loading is required | Clear limitation and future fallback guidance |
 
-The ChatGPT adapter decodes the public page's embedded conversation format and renders Markdown with syntax highlighting. When ChatGPT blocks the deployed server, the optional pAIcture Companion opens the public page as a browser user and extracts the rendered, ordered message DOM. Gemini and Claude intentionally stop instead of returning an incomplete conversation. Future fallbacks can add authenticated connections, official APIs where available, and user-provided exports.
+The ChatGPT adapter decodes the public page's embedded conversation format and renders Markdown with syntax highlighting. When ChatGPT blocks the deployed server, pAIcture automatically asks Jina Reader for the rendered public HTML, then runs the same local structured parser—no screenshot or OCR is used. The optional pAIcture Companion remains a final browser-assisted fallback. Gemini and Claude intentionally stop instead of returning an incomplete conversation. Future fallbacks can add authenticated connections, official APIs where available, and user-provided exports.
 
 ## Planned platforms
 

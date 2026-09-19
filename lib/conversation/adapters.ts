@@ -82,6 +82,30 @@ function messagesFromConversation(conversation: Record<string, unknown>): Extrac
     return role && text.trim() ? [{ id: `message-${index + 1}`, role, html: renderMarkdown(text) } satisfies ExtractedMessage] : [];
   });
 }
+type FetchedShare = { html: string; usedReaderFallback: boolean };
+
+async function fetchChatGptShare(url: URL): Promise<FetchedShare> {
+  const response = await fetch(url, { redirect: "follow", headers });
+  if (response.ok) return { html: await response.text(), usedReaderFallback: false };
+  if (response.status === 404) throw new Error("This shared conversation is unavailable or expired.");
+
+  // ChatGPT currently rejects requests from some serverless networks. Jina Reader
+  // retrieves the same public page and can return its rendered HTML, including the
+  // original React hydration payload that we parse below. This remains structured
+  // extraction; no screenshot or OCR is involved.
+  if (response.status === 403 || response.status === 429) {
+    const readerUrl = new URL(`https://r.jina.ai/https://${url.host}${url.pathname}${url.search}`);
+    const readerResponse = await fetch(readerUrl, {
+      redirect: "follow",
+      headers: { Accept: "text/html", "X-Return-Format": "html" },
+    });
+    if (readerResponse.ok) return { html: await readerResponse.text(), usedReaderFallback: true };
+    throw new Error(`ChatGPT returned HTTP ${response.status}, and the server-side public-page fallback also failed with HTTP ${readerResponse.status}.`);
+  }
+
+  throw new Error(`The platform returned HTTP ${response.status} and did not allow the conversation to be read.`);
+}
+
 async function fetchShare(url: URL) {
   const response = await fetch(url, { redirect: "follow", headers });
   if (!response.ok) throw new Error(response.status === 404 ? "This shared conversation is unavailable or expired." : `The platform returned HTTP ${response.status} and did not allow the conversation to be read.`);
@@ -91,7 +115,7 @@ const chatgpt: ConversationAdapter = {
   platform: "chatgpt",
   matches: (url) => ["chatgpt.com", "chat.openai.com"].includes(url.hostname.replace(/^www\./, "")) && /^\/share\/[a-z0-9-]+\/?$/i.test(url.pathname),
   async extract(url): Promise<ExtractedConversation> {
-    const html = await fetchShare(url);
+    const { html, usedReaderFallback } = await fetchChatGptShare(url);
     const enqueue = /window\.__reactRouterContext\.streamController\.enqueue\(((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*'))\)/g;
     let conversation: Record<string, unknown> | null = null;
     for (const match of html.matchAll(enqueue)) {
@@ -105,7 +129,9 @@ const chatgpt: ConversationAdapter = {
     if (!conversation) throw new Error("ChatGPT returned the public page, but its embedded conversation payload was missing or used an unsupported format.");
     const messages = messagesFromConversation(conversation);
     if (!messages.length) throw new Error("ChatGPT returned the conversation metadata, but no user or assistant messages could be decoded.");
-    return { title: typeof conversation.title === "string" ? conversation.title : titleFromHtml(html, "chatgpt"), platform: "chatgpt", messages, warnings: ["Interactive canvases and files that require a signed-in ChatGPT session cannot be embedded automatically."] };
+    const warnings = ["Interactive canvases and files that require a signed-in ChatGPT session cannot be embedded automatically."];
+    if (usedReaderFallback) warnings.push("ChatGPT blocked the hosting network, so this public page was retrieved through Jina Reader before local structured parsing. No screenshot or OCR was used.");
+    return { title: typeof conversation.title === "string" ? conversation.title : titleFromHtml(html, "chatgpt"), platform: "chatgpt", messages, warnings };
   },
 };
 function browserOnlyAdapter(platform: "gemini" | "claude", hosts: string[], detail: string): ConversationAdapter {
