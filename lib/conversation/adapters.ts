@@ -95,10 +95,19 @@ async function fetchChatGptShare(url: URL): Promise<FetchedShare> {
   // extraction; no screenshot or OCR is involved.
   if (response.status === 403 || response.status === 429) {
     const readerUrl = new URL(`https://r.jina.ai/https://${url.host}${url.pathname}${url.search}`);
-    const readerResponse = await fetch(readerUrl, {
-      redirect: "follow",
-      headers: { Accept: "text/html", "X-Return-Format": "html" },
-    });
+    const readerHeaders = {
+      Accept: "text/html",
+      "X-Return-Format": "html",
+      // The public share URL is immutable enough for an import session. Reusing
+      // Reader's cached render avoids burning its anonymous 20 RPM allowance.
+      "X-Cache-Tolerance": "86400",
+    };
+    let readerResponse = await fetch(readerUrl, { redirect: "follow", headers: readerHeaders });
+    if (readerResponse.status === 429) {
+      const retryAfter = Number(readerResponse.headers.get("retry-after") || 1);
+      await new Promise((resolve) => setTimeout(resolve, Math.min(Math.max(retryAfter, 1), 5) * 1000));
+      readerResponse = await fetch(readerUrl, { redirect: "follow", headers: readerHeaders });
+    }
     if (readerResponse.ok) return { html: await readerResponse.text(), usedReaderFallback: true };
     throw new Error(`ChatGPT returned HTTP ${response.status}, and the server-side public-page fallback also failed with HTTP ${readerResponse.status}.`);
   }
