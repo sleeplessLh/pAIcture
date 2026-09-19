@@ -52,7 +52,16 @@ function contentText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!content || typeof content !== "object") return "";
   const record = content as Record<string, unknown>;
-  if (Array.isArray(record.parts)) return record.parts.map((part) => typeof part === "string" ? part : "").filter(Boolean).join("\n\n");
+  if (Array.isArray(record.parts)) return record.parts.map((part) => {
+    if (typeof part === "string") return part;
+    if (!part || typeof part !== "object") return "";
+    const item = part as Record<string, unknown>;
+    if (typeof item.text === "string") return item.text;
+    const imageUrl = typeof item.image_url === "string" ? item.image_url : typeof item.url === "string" ? item.url : "";
+    if (imageUrl && /^https:\/\//i.test(imageUrl)) return `![Shared conversation image](${imageUrl})`;
+    if (typeof item.asset_pointer === "string") return `> Image or attachment reference: ${item.asset_pointer}`;
+    return "";
+  }).filter(Boolean).join("\n\n");
   return typeof record.text === "string" ? record.text : "";
 }
 function messagesFromConversation(conversation: Record<string, unknown>): ExtractedMessage[] {
@@ -80,7 +89,7 @@ async function fetchShare(url: URL) {
 }
 const chatgpt: ConversationAdapter = {
   platform: "chatgpt",
-  matches: (url) => ["chatgpt.com", "chat.openai.com"].includes(url.hostname.replace(/^www\./, "")),
+  matches: (url) => ["chatgpt.com", "chat.openai.com"].includes(url.hostname.replace(/^www\./, "")) && /^\/share\/[a-z0-9-]+\/?$/i.test(url.pathname),
   async extract(url): Promise<ExtractedConversation> {
     const html = await fetchShare(url);
     const enqueue = /window\.__reactRouterContext\.streamController\.enqueue\(((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*'))\)/g;

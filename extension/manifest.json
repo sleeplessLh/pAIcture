@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "pAIcture Companion",
+  "version": "0.1.0",
+  "description": "Reads public AI conversation pages in your browser and sends structured content to pAIcture.",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": ["https://chatgpt.com/share/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://paicture.lawrancehii12345.chatgpt.site/*",
+        "http://127.0.0.1:4173/*",
+        "http://localhost:4173/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

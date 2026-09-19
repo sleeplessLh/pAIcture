@@ -6,6 +6,7 @@ import { ArrowRight, Check, ChevronDown, Download, FileImage, FileText, Link2, L
 type Platform = "chatgpt" | "gemini" | "claude";
 type Message = { id: string; role: "user" | "assistant"; html: string };
 type Conversation = { title: string; platform: Platform; messages: Message[]; warnings?: string[] };
+type ExtractResponse = Conversation & { error?: string; browserFallback?: boolean };
 const platforms: Record<Platform, { name: string; mark: string }> = { chatgpt: { name: "ChatGPT", mark: "◎" }, gemini: { name: "Gemini", mark: "✦" }, claude: { name: "Claude", mark: "C" } };
 
 function detectPlatform(value: string): Platform | null {
@@ -16,6 +17,28 @@ function detectPlatform(value: string): Platform | null {
     if (host === "claude.ai") return "claude";
   } catch {}
   return null;
+}
+
+function companionRequest(type: "ping" | "extract", url?: string, timeout = 1000) {
+  return new Promise<Conversation | true>((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const timer = window.setTimeout(() => {
+      window.removeEventListener("message", listener);
+      reject(new Error(type === "ping" ? "The pAIcture Companion is not installed or enabled." : "The browser companion did not finish extracting the conversation."));
+    }, timeout);
+    const listener = (event: MessageEvent) => {
+      if (event.source !== window || event.data?.source !== "paicture-companion" || event.data?.requestId !== requestId) return;
+      if (type === "ping" && event.data.type === "ready") {
+        clearTimeout(timer); window.removeEventListener("message", listener); resolve(true); return;
+      }
+      if (type === "extract" && event.data.type === "result") {
+        clearTimeout(timer); window.removeEventListener("message", listener);
+        if (event.data.error) reject(new Error(event.data.error)); else resolve(event.data.conversation as Conversation);
+      }
+    };
+    window.addEventListener("message", listener);
+    window.postMessage({ source: "paicture-web", type, requestId, url }, location.origin);
+  });
 }
 
 export default function Home() {
@@ -43,8 +66,23 @@ export default function Home() {
     const timer = window.setInterval(() => setProgress((value) => Math.min(value + 9, 86)), 420);
     try {
       const response = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url.trim() }) });
-      const data = await response.json() as Conversation & { error?: string };
-      if (!response.ok) throw new Error(data.error || "We could not read this conversation.");
+      const responseText = await response.text();
+      let data: ExtractResponse;
+      try { data = JSON.parse(responseText) as ExtractResponse; }
+      catch {
+        if (response.status === 401 || /sign in required/i.test(responseText)) throw new Error("Your pAIcture session is not signed in. Sign in to the site, then try the link again.");
+        throw new Error(`pAIcture received ${response.headers.get("content-type") || "a non-JSON response"} (HTTP ${response.status}) instead of extraction data.`);
+      }
+      if (!response.ok) {
+        if (detected === "chatgpt" && data.browserFallback) {
+          try {
+            await companionRequest("ping", undefined, 900);
+            data = await companionRequest("extract", url.trim(), 35000) as Conversation;
+          } catch (fallbackError) {
+            throw new Error(`${data.error || "Direct extraction was blocked."} ${fallbackError instanceof Error ? fallbackError.message : ""} Download the companion below to enable browser-assisted structured extraction.`);
+          }
+        } else throw new Error(data.error || "We could not read this conversation.");
+      }
       setConversation(data); setProgress(100); setStatus("ready");
       requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "We could not read this conversation."); setStatus("error"); setProgress(0); }
@@ -56,25 +94,33 @@ export default function Home() {
     setExporting(true);
     const { default: html2canvas } = await import("html2canvas");
     try {
-      const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
       const slug = conversation.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "conversation";
+      const source = previewRef.current;
+      const pageAspect = 841.89 / 595.28;
+      const pageHeight = Math.max(900, Math.floor(source.clientWidth * pageAspect));
+      const totalHeight = source.scrollHeight;
+      const pages = [] as HTMLCanvasElement[];
+      for (let offset = 0; offset < totalHeight; offset += pageHeight) {
+        const canvas = await html2canvas(source, {
+          scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false,
+          y: offset, height: Math.min(pageHeight, totalHeight - offset),
+          windowWidth: source.scrollWidth, windowHeight: totalHeight,
+        });
+        pages.push(canvas);
+      }
       if (format === "pdf") {
         const { jsPDF } = await import("jspdf");
         const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
-        const pageWidth = pdf.internal.pageSize.getWidth(), pageHeight = pdf.internal.pageSize.getHeight();
-        const renderHeight = canvas.height * pageWidth / canvas.width;
-        const image = canvas.toDataURL("image/jpeg", .94);
-        for (let page = 0, y = 0; y < renderHeight; page += 1, y += pageHeight) {
-          if (page) pdf.addPage();
-          pdf.addImage(image, "JPEG", 0, -y, pageWidth, renderHeight, undefined, "FAST");
-        }
+        const pdfWidth = pdf.internal.pageSize.getWidth(), pdfHeight = pdf.internal.pageSize.getHeight();
+        pages.forEach((canvas, index) => {
+          if (index) pdf.addPage();
+          const height = Math.min(pdfHeight, canvas.height * pdfWidth / canvas.width);
+          pdf.addImage(canvas.toDataURL("image/jpeg", .94), "JPEG", 0, 0, pdfWidth, height, undefined, "FAST");
+        });
         pdf.save(`${slug}.pdf`);
       } else {
-        const maxHeight = 5600;
-        for (let page = 0; page < Math.ceil(canvas.height / maxHeight); page++) {
-          const slice = document.createElement("canvas"); slice.width = canvas.width; slice.height = Math.min(maxHeight, canvas.height - page * maxHeight);
-          slice.getContext("2d")?.drawImage(canvas, 0, page * maxHeight, canvas.width, slice.height, 0, 0, canvas.width, slice.height);
-          const link = document.createElement("a"); link.download = `${slug}-${page + 1}.png`; link.href = slice.toDataURL("image/png", 1); link.click();
+        for (let page = 0; page < pages.length; page++) {
+          const link = document.createElement("a"); link.download = `${slug}-${page + 1}.png`; link.href = pages[page].toDataURL("image/png", 1); link.click();
           await new Promise((resolve) => setTimeout(resolve, 180));
         }
       }
@@ -86,7 +132,7 @@ export default function Home() {
     <section id="top" className="hero"><div className="eyebrow"><Sparkles size={14} /> AI conversations, beautifully kept</div><h1>From shared chat<br />to <em>finished document.</em></h1><p className="hero-copy">Turn public AI conversations into polished PDFs or high-resolution images—without losing the structure that makes them useful.</p>
       <form className="link-card" onSubmit={processConversation}><label htmlFor="conversation-url">Paste a public conversation link</label><div className={`url-field ${status === "error" ? "invalid" : ""}`}><Link2 size={20} /><input id="conversation-url" value={url} onChange={(event) => { setUrl(event.target.value); if (status === "error") setStatus("idle"); }} placeholder="https://chatgpt.com/share/…" autoComplete="url" />{detected && <span className="detected"><span>{platforms[detected].mark}</span>{platforms[detected].name}</span>}<button type="submit" disabled={status === "loading"}>{status === "loading" ? <LoaderCircle className="spin" size={20} /> : <ArrowRight size={20} />}</button></div>
         {status === "loading" && <div className="progress-wrap"><div className="progress-line"><span style={{ width: `${progress}%` }} /></div><p>Reading the conversation and preserving its structure… <strong>{progress}%</strong></p></div>}
-        {status === "error" && <div className="error-note"><strong>We couldn’t complete this import.</strong><span>{error}</span></div>}
+        {status === "error" && <div className="error-note"><strong>We couldn’t complete this import.</strong><span>{error}</span>{detected === "chatgpt" && error.includes("companion") ? <a href="/paicture-companion.zip" download>Download pAIcture Companion</a> : null}</div>}
         <div className="supported"><span>Recognized links</span>{(Object.keys(platforms) as Platform[]).map((key) => <div key={key}><i>{platforms[key].mark}</i>{platforms[key].name}</div>)}</div></form>
       <div className="trust-row"><span><ShieldCheck size={17} />Processed only when you ask</span><span><Check size={17} />Formatting preserved</span><span><Check size={17} />No public gallery</span></div></section>
     {conversation ? <section id="preview" className="workspace"><div className="workspace-heading"><div><span className="section-index">01 / Preview</span><h2>Review before export</h2><p>Check every message, image, table, and code block before creating the final file.</p></div><div className="platform-pill"><span>{platforms[conversation.platform].mark}</span>{platforms[conversation.platform].name}</div></div>
