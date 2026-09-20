@@ -27,6 +27,9 @@ export const PAICTURE_WIDGET_HTML = String.raw`<!doctype html>
       for(const message of data.messages){const article=document.createElement('article');article.className='message';const role=document.createElement('div');role.className='role';role.textContent=message.role==='user'?'You':'AI assistant';const content=document.createElement('div');content.className='content';content.innerHTML=message.html||'';article.append(role,content);doc.append(article)}
       notice.textContent='Review the conversation, then export it. Content is processed only for this tool result.';
     }
+    function renderHostOutput(){const output=window.openai&&window.openai.toolOutput;if(output)render(output)}
+    renderHostOutput();
+    window.addEventListener('openai:set_globals',(event)=>{const globals=event.detail&&event.detail.globals;if(globals&&globals.toolOutput)render(globals.toolOutput)},{passive:true});
     window.addEventListener('message',(event)=>{if(event.source!==window.parent)return;const message=event.data;if(!message||message.jsonrpc!=='2.0')return;if(message.method==='ui/notifications/tool-result')render(message.params&&message.params.structuredContent);if(message.method==='ui/notifications/tool-input'&&!current)render(message.params)} ,{passive:true});
     document.getElementById('pdf').onclick=()=>window.print();
     document.getElementById('images').onclick=async()=>{
