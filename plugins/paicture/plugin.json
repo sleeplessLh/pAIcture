@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Turn the current AI conversation into a polished PDF or paginated PNG images.",
   "author": { "name": "pAIcture" },
-  "homepage": "https://paicture.lawrancehii12345.chatgpt.site",
+  "homepage": "https://paicture-plugin.lawrancehii12345.chatgpt.site",
   "repository": "https://github.com/sleeplessLh/pAIcture",
   "license": "MIT",
   "keywords": ["chatgpt", "pdf", "conversation", "export"],
@@ -18,7 +18,7 @@
         "developerName": "pAIcture",
         "category": "Productivity",
         "capabilities": ["Read", "Interactive"],
-        "websiteURL": "https://paicture.lawrancehii12345.chatgpt.site",
+        "websiteURL": "https://paicture-plugin.lawrancehii12345.chatgpt.site",
         "defaultPrompt": ["Export this conversation with pAIcture.", "Create a PDF preview of this chat.", "Turn this conversation into PNG pages."],
         "brandColor": "#ED5B35"
       }

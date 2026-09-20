@@ -13,7 +13,7 @@
     "developerName": "pAIcture",
     "category": "Productivity",
     "capabilities": ["Read", "Interactive"],
-    "websiteURL": "https://paicture.lawrancehii12345.chatgpt.site",
+    "websiteURL": "https://paicture-plugin.lawrancehii12345.chatgpt.site",
     "defaultPrompt": [
       "Export this conversation with pAIcture.",
       "Create a PDF preview of this chat.",
