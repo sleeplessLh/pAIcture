@@ -73,7 +73,7 @@ async function handle(request: RpcRequest) {
     case "resources/templates/list": return result(id, { resourceTemplates: [] });
     case "resources/read": {
       if (request.params?.uri !== PAICTURE_WIDGET_URI) return failure(id, -32002, "Resource not found.");
-      return result(id, { contents: [{ uri: PAICTURE_WIDGET_URI, mimeType: "text/html;profile=mcp-app", text: PAICTURE_WIDGET_HTML, _meta: { ui: { prefersBorder: true } } }] });
+      return result(id, { contents: [{ uri: PAICTURE_WIDGET_URI, mimeType: "text/html;profile=mcp-app", text: PAICTURE_WIDGET_HTML, _meta: { ui: { prefersBorder: true, domain: "https://paicture-plugin.lawrancehii12345.chatgpt.site", csp: { connectDomains: [], resourceDomains: ["https://cdn.jsdelivr.net"] } } } }] });
     }
     case "tools/call": {
       if (request.params?.name !== tool.name) return failure(id, -32602, "Unknown tool.");
