@@ -3,7 +3,7 @@
   "mcpServers": {
     "paicture": {
       "type": "streamable-http",
-      "url": "https://paicture-plugin.lawrancehii12345.chatgpt.site/mcp"
+      "url": "https://paicture-plugin.lawrancehii12345.chatgpt.site/api/mcp"
     }
   }
 }

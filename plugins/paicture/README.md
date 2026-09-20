@@ -6,7 +6,7 @@ The pAIcture Agent Plugin lets ChatGPT send the current conversation to a struct
 
 1. Deploy the main pAIcture site.
 2. Enable Developer Mode in ChatGPT.
-3. Register `https://paicture-plugin.lawrancehii12345.chatgpt.site/mcp` as a Streamable HTTP MCP server.
+3. Register `https://paicture-plugin.lawrancehii12345.chatgpt.site/api/mcp` as a Streamable HTTP MCP server.
 4. Ask ChatGPT: `Export this conversation with pAIcture.`
 
 The server does not persist conversation contents. It accepts only the messages supplied to the tool call and sanitizes rendered Markdown before returning it to the widget.
