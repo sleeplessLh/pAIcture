@@ -1,0 +1,26 @@
+{
+  "name": "paicture",
+  "version": "0.1.0",
+  "description": "Turn the current AI conversation into a polished PDF or paginated PNG images.",
+  "author": {
+    "name": "pAIcture"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "pAIcture",
+    "shortDescription": "Export AI conversations as PDF or images.",
+    "longDescription": "Prepare the current ChatGPT conversation as a faithful document preview, then save it as an A4 PDF or paginated high-resolution PNG images.",
+    "developerName": "pAIcture",
+    "category": "Productivity",
+    "capabilities": ["Read", "Interactive"],
+    "websiteURL": "https://paicture.lawrancehii12345.chatgpt.site",
+    "defaultPrompt": [
+      "Export this conversation with pAIcture.",
+      "Create a PDF preview of this chat.",
+      "Turn this conversation into PNG pages."
+    ],
+    "brandColor": "#ED5B35"
+  },
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json"
+}

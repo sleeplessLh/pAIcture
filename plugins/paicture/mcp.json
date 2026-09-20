@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "paicture": {
+      "type": "streamable-http",
+      "url": "https://paicture.lawrancehii12345.chatgpt.site/mcp"
+    }
+  }
+}
