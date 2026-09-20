@@ -1,4 +1,4 @@
-export const PAICTURE_WIDGET_URI = "ui://paicture/export/v2.html";
+export const PAICTURE_WIDGET_URI = "ui://paicture/export/v3.html";
 
 export const PAICTURE_WIDGET_HTML = String.raw`<!doctype html>
 <html lang="en">
@@ -16,6 +16,7 @@ export const PAICTURE_WIDGET_HTML = String.raw`<!doctype html>
     <section class="document" id="document"><div class="empty">Ask ChatGPT to export the current conversation with pAIcture.</div></section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@3.0.3/dist/jspdf.umd.min.js"></script>
   <script>
     const doc = document.getElementById('document'); const notice = document.getElementById('notice');
     let current = null;
@@ -32,12 +33,14 @@ export const PAICTURE_WIDGET_HTML = String.raw`<!doctype html>
     renderHostOutput();
     window.addEventListener('openai:set_globals',(event)=>{const globals=event.detail&&event.detail.globals;if(globals&&globals.toolOutput)render(globals.toolOutput)},{passive:true});
     window.addEventListener('message',(event)=>{if(event.source!==window.parent)return;const message=event.data;if(!message||message.jsonrpc!=='2.0')return;if(message.method==='ui/notifications/tool-result')render(message.params&&message.params.structuredContent);if(message.method==='ui/notifications/tool-input'&&!current)render(message.params)} ,{passive:true});
-    document.getElementById('pdf').onclick=()=>window.print();
+    function collectPages(){const messages=[...doc.querySelectorAll('.message')];const header=[...doc.children].filter((node)=>!node.classList.contains('message'));const groups=[];let group=[];let height=0;for(const message of messages){const h=message.getBoundingClientRect().height;if(group.length&&height+h>980){groups.push(group);group=[];height=0}group.push(message);height+=h}if(group.length)groups.push(group);return{header,groups}}
+    async function renderPage(group,header,index){const page=document.createElement('div');page.style.cssText='position:fixed;left:-12000px;top:0;width:1120px;background:#fff;color:#171715;padding:70px;font-family:Inter,Arial,sans-serif';if(index===0)header.forEach((node)=>page.append(node.cloneNode(true)));group.forEach((node)=>page.append(node.cloneNode(true)));document.body.append(page);try{return await html2canvas(page,{scale:2,backgroundColor:'#fff',useCORS:true,logging:false,windowWidth:1260})}finally{page.remove()}}
+    document.getElementById('pdf').onclick=async()=>{if(!current)return;const button=document.getElementById('pdf');button.disabled=true;notice.textContent='Preparing a high-quality PDF…';try{if(typeof html2canvas!=='function'||!window.jspdf||!window.jspdf.jsPDF)throw new Error('PDF renderer unavailable');const pages=collectPages();const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});for(let index=0;index<pages.groups.length;index++){const canvas=await renderPage(pages.groups[index],pages.header,index);if(index>0)pdf.addPage('a4','portrait');const width=190;const height=canvas.height*width/canvas.width;pdf.addImage(canvas.toDataURL('image/jpeg',0.96),'JPEG',10,10,width,Math.min(height,277),undefined,'FAST')}pdf.save(safeName(current.title)+'.pdf');notice.textContent='PDF export complete.'}catch(error){notice.textContent='PDF export could not finish. Try the PNG export instead.'}finally{button.disabled=false}};
     document.getElementById('images').onclick=async()=>{
       if(!current)return;const button=document.getElementById('images');button.disabled=true;notice.textContent='Preparing high-resolution PNG pages…';
-      try{const messages=[...doc.querySelectorAll('.message')];const header=[...doc.children].filter((node)=>!node.classList.contains('message'));const groups=[];let group=[];let height=0;for(const message of messages){const h=message.getBoundingClientRect().height;if(group.length&&height+h>980){groups.push(group);group=[];height=0}group.push(message);height+=h}if(group.length)groups.push(group);
+      try{const pages=collectPages();
         if(typeof html2canvas!=='function')throw new Error('Image renderer unavailable');
-        for(let index=0;index<groups.length;index++){const page=document.createElement('div');page.style.cssText='position:fixed;left:-12000px;top:0;width:1120px;background:#fff;color:#171715;padding:70px;font-family:Inter,Arial,sans-serif';if(index===0)header.forEach((node)=>page.append(node.cloneNode(true)));groups[index].forEach((node)=>page.append(node.cloneNode(true)));document.body.append(page);const canvas=await html2canvas(page,{scale:2,backgroundColor:'#fff',useCORS:true,logging:false,windowWidth:1260});page.remove();const blob=await new Promise((resolve)=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNG encoding failed');const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=safeName(current.title)+'-'+String(index+1).padStart(2,'0')+'.png';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1500);await new Promise((resolve)=>setTimeout(resolve,220))}
+        for(let index=0;index<pages.groups.length;index++){const canvas=await renderPage(pages.groups[index],pages.header,index);const blob=await new Promise((resolve)=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNG encoding failed');const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=safeName(current.title)+'-'+String(index+1).padStart(2,'0')+'.png';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1500);await new Promise((resolve)=>setTimeout(resolve,220))}
         notice.textContent='PNG export complete.';
       }catch(error){notice.textContent='Image export could not finish. Use Save as PDF or open the pAIcture website.'}finally{button.disabled=false}
     };
