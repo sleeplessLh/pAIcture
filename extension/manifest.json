@@ -1,15 +1,17 @@
 {
   "manifest_version": 3,
   "name": "pAIcture Companion",
-  "version": "0.1.0",
-  "description": "Reads public AI conversation pages in your browser and sends structured content to pAIcture.",
+  "version": "0.2.0",
+  "description": "Imports a selected ChatGPT conversation from your signed-in browser into pAIcture.",
   "permissions": ["tabs", "scripting"],
-  "host_permissions": ["https://chatgpt.com/share/*"],
+  "host_permissions": ["https://chatgpt.com/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
       "matches": [
         "https://paicture.lawrancehii12345.chatgpt.site/*",
+        "http://127.0.0.1:5173/*",
+        "http://localhost:5173/*",
         "http://127.0.0.1:4173/*",
         "http://localhost:4173/*"
       ],

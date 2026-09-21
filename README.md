@@ -4,21 +4,20 @@ pAIcture is a web application designed to transform shared AI conversations into
 
 ## Status
 
-pAIcture is in active early development. The current build includes the responsive import workspace, platform-aware extraction adapters, conversation preview, light and dark themes, high-resolution PDF output, and paginated PNG export.
+pAIcture is in active early development. The current milestone focuses exclusively on reliable ChatGPT import, preview, PDF export, and paginated PNG export.
 
 Platform share-page formats and access controls can change without notice. pAIcture reports inaccessible or incomplete imports before export rather than silently dropping content.
 
 ## Verified extraction feasibility
 
-Real public share links were tested on September 16, 2026:
+Real signed-in ChatGPT conversations were tested on September 21, 2026:
 
 | Platform | Browser access | Server extraction | Current result |
 | --- | --- | --- | --- |
-| ChatGPT | Public page opens | The structured hydration payload is parsed directly; if ChatGPT blocks the hosting network, the same public page is retrieved as rendered HTML through Jina Reader and parsed locally | Structured preview plus PDF and paginated PNG export |
-| Gemini | Public conversation renders in a browser | The initial HTML does not include the messages; browser-side data loading is required | Clear limitation and future fallback guidance |
-| Claude | Public conversation renders in a browser | The initial HTML does not include the messages; browser-side data loading is required | Clear limitation and future fallback guidance |
+| ChatGPT public shares | Public `/share/…` page | Structured server extraction with browser fallback | Structured preview plus PDF and paginated PNG export |
+| ChatGPT private conversations | Signed-in `/c/…` or `/g/…/c/…` page | Browser-assisted extraction of the explicitly submitted URL | Complete ordered message validation before preview |
 
-The ChatGPT adapter decodes the public page's embedded conversation format and renders Markdown with syntax highlighting. When ChatGPT blocks the deployed server, pAIcture automatically asks Jina Reader for the rendered public HTML, then runs the same local structured parser—no screenshot or OCR is used. The optional pAIcture Companion remains a final browser-assisted fallback. Gemini and Claude intentionally stop instead of returning an incomplete conversation. Future fallbacks can add authenticated connections, official APIs where available, and user-provided exports.
+The ChatGPT adapter decodes public-page structured data when available. Private conversations and server-blocked public shares use pAIcture Companion: the extension opens only the submitted URL in the user's existing ChatGPT session, validates that every rendered turn was extracted, sanitizes the message HTML, and returns the normalized conversation. Session cookies and credentials are never sent to pAIcture. Claude and Gemini work is intentionally paused until the ChatGPT workflow is reliable.
 
 ## Planned platforms
 
