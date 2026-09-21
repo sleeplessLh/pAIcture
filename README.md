@@ -14,10 +14,10 @@ Real signed-in ChatGPT conversations were tested on September 21, 2026:
 
 | Platform | Browser access | Server extraction | Current result |
 | --- | --- | --- | --- |
-| ChatGPT public shares | Public `/share/…` page | Structured server extraction with browser fallback | Structured preview plus PDF and paginated PNG export |
+| ChatGPT public shares | Public `/share/…` page | Browser-assisted extraction in the user's session | Structured preview plus PDF and paginated PNG export |
 | ChatGPT private conversations | Signed-in `/c/…` or `/g/…/c/…` page | Browser-assisted extraction of the explicitly submitted URL | Complete ordered message validation before preview |
 
-The ChatGPT adapter decodes public-page structured data when available. Private conversations and server-blocked public shares use pAIcture Companion: the extension opens only the submitted URL in the user's existing ChatGPT session, validates that every rendered turn was extracted, sanitizes the message HTML, and returns the normalized conversation. Session cookies and credentials are never sent to pAIcture. Claude and Gemini work is intentionally paused until the ChatGPT workflow is reliable.
+All normal ChatGPT imports now use pAIcture Companion. The website does not fetch ChatGPT pages from its backend. The extension can either open a submitted URL or export the conversation already open in the browser, validates that every rendered turn was extracted, sanitizes the message HTML, and transfers the normalized conversation through one-time local extension storage. Session cookies and credentials are never sent to pAIcture. Claude and Gemini work is intentionally paused until the ChatGPT workflow is reliable.
 
 ## Planned platforms
 
@@ -35,7 +35,7 @@ The ChatGPT adapter decodes public-page structured data when available. Private 
 ```text
 pAIcture/
 ├── app/                    # Interface and server routes
-│   └── api/extract/        # Conversation import endpoint
+├── extension/              # Authenticated browser-side ChatGPT extraction
 ├── lib/conversation/       # Platform adapters and safe content handling
 ├── public/                 # Public brand assets
 └── components/             # Reusable interface primitives

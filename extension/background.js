@@ -1,35 +1,70 @@
 const CHATGPT_CONVERSATION = /^https:\/\/(?:www\.)?chatgpt\.com\/(?:share\/[a-z0-9-]+|c\/[a-z0-9-]+|g\/[^/]+\/c\/[a-z0-9-]+)(?:[/?#].*)?$/i;
+const PAICTURE_URL = "https://paicture.lawrancehii12345.chatgpt.site/";
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "consume") {
+    consumeTransfer(message.transferId).then(sendResponse, (error) => sendResponse({ error: error instanceof Error ? error.message : "Import transfer failed." }));
+    return true;
+  }
   if (message?.type !== "extract") return false;
-  extractConversation(message.url).then(
+  extractConversationUrl(message.url).then(
     (conversation) => sendResponse({ conversation }),
     (error) => sendResponse({ error: error instanceof Error ? error.message : "Extraction failed." }),
   );
   return true;
 });
 
-async function extractConversation(url) {
+chrome.action.onClicked.addListener(async (tab) => {
+  if (!tab.id || !tab.url || !CHATGPT_CONVERSATION.test(tab.url)) {
+    await chrome.tabs.create({ url: PAICTURE_URL });
+    return;
+  }
+  try {
+    const conversation = await extractFromTab(tab.id);
+    const transferId = crypto.randomUUID();
+    await chrome.storage.local.set({ [`transfer:${transferId}`]: { conversation, createdAt: Date.now() } });
+    await chrome.tabs.create({ url: `${PAICTURE_URL}?import=${encodeURIComponent(transferId)}` });
+  } catch (error) {
+    const transferId = crypto.randomUUID();
+    await chrome.storage.local.set({ [`transfer:${transferId}`]: { error: error instanceof Error ? error.message : "Extraction failed.", createdAt: Date.now() } });
+    await chrome.tabs.create({ url: `${PAICTURE_URL}?import=${encodeURIComponent(transferId)}` });
+  }
+});
+
+async function consumeTransfer(transferId) {
+  if (typeof transferId !== "string" || !/^[a-f0-9-]{36}$/i.test(transferId)) throw new Error("Invalid import transfer.");
+  const key = `transfer:${transferId}`;
+  const stored = (await chrome.storage.local.get(key))[key];
+  await chrome.storage.local.remove(key);
+  if (!stored || Date.now() - stored.createdAt > 5 * 60 * 1000) throw new Error("This import transfer expired. Return to ChatGPT and click Export with pAIcture again.");
+  return stored;
+}
+
+async function extractConversationUrl(url) {
   if (!CHATGPT_CONVERSATION.test(url)) throw new Error("Use a ChatGPT conversation URL ending in /c/… or /share/…");
   const tab = await chrome.tabs.create({ url, active: false });
   try {
     await waitUntilComplete(tab.id);
-    let previousCount = -1;
-    let stablePasses = 0;
-    let result;
-    for (let attempt = 0; attempt < 20 && stablePasses < 3; attempt += 1) {
-      [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractRenderedChatGPT });
-      const count = result?.messages?.length || 0;
-      stablePasses = count > 0 && count === previousCount ? stablePasses + 1 : 0;
-      previousCount = count;
-      if (stablePasses < 3) await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    if (!result?.messages?.length) throw new Error("ChatGPT opened, but no messages were found. Confirm that you are signed in and can view this conversation in the same browser.");
-    if (result.expectedTurns !== result.messages.length) throw new Error(`ChatGPT rendered ${result.expectedTurns} conversation turns, but only ${result.messages.length} could be extracted. Import stopped to prevent silent omissions.`);
-    return result;
+    return await extractFromTab(tab.id);
   } finally {
     if (tab.id) await chrome.tabs.remove(tab.id).catch(() => {});
   }
+}
+
+async function extractFromTab(tabId) {
+  let previousCount = -1;
+  let stablePasses = 0;
+  let result;
+  for (let attempt = 0; attempt < 20 && stablePasses < 3; attempt += 1) {
+    [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: extractRenderedChatGPT });
+    const count = result?.messages?.length || 0;
+    stablePasses = count > 0 && count === previousCount ? stablePasses + 1 : 0;
+    previousCount = count;
+    if (stablePasses < 3) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!result?.messages?.length) throw new Error("ChatGPT opened, but no messages were found. Confirm that you are signed in and can view this conversation in the same browser.");
+  if (result.expectedTurns !== result.messages.length) throw new Error(`ChatGPT rendered ${result.expectedTurns} conversation turns, but only ${result.messages.length} could be extracted. Import stopped to prevent silent omissions.`);
+  return result;
 }
 
 function waitUntilComplete(tabId) {

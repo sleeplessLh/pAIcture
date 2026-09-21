@@ -6,7 +6,6 @@ import { ArrowRight, Check, ChevronDown, Download, FileImage, FileText, Link2, L
 type Platform = "chatgpt" | "gemini" | "claude";
 type Message = { id: string; role: "user" | "assistant"; html: string };
 type Conversation = { title: string; platform: Platform; messages: Message[]; warnings?: string[] };
-type ExtractResponse = Conversation & { error?: string; browserFallback?: boolean };
 const platforms: Record<Platform, { name: string; mark: string }> = { chatgpt: { name: "ChatGPT", mark: "◎" }, gemini: { name: "Gemini", mark: "✦" }, claude: { name: "Claude", mark: "C" } };
 
 function detectPlatform(value: string): Platform | null {
@@ -17,7 +16,7 @@ function detectPlatform(value: string): Platform | null {
   return null;
 }
 
-function companionRequest(type: "ping" | "extract", url?: string, timeout = 1000) {
+function companionRequest(type: "ping" | "extract" | "consume", options: { url?: string; transferId?: string } = {}, timeout = 1000) {
   return new Promise<Conversation | true>((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const timer = window.setTimeout(() => {
@@ -35,7 +34,7 @@ function companionRequest(type: "ping" | "extract", url?: string, timeout = 1000
       }
     };
     window.addEventListener("message", listener);
-    window.postMessage({ source: "paicture-web", type, requestId, url }, location.origin);
+    window.postMessage({ source: "paicture-web", type, requestId, ...options }, location.origin);
   });
 }
 
@@ -48,6 +47,7 @@ export default function Home() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [format, setFormat] = useState<"pdf" | "images">("pdf");
   const [exporting, setExporting] = useState(false);
+  const [companion, setCompanion] = useState<"checking" | "ready" | "missing">("checking");
   const previewRef = useRef<HTMLDivElement>(null);
   const detected = useMemo(() => detectPlatform(url.trim()), [url]);
 
@@ -56,44 +56,27 @@ export default function Home() {
     setTheme(saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("paicture-theme", theme); }, [theme]);
+  useEffect(() => {
+    companionRequest("ping", {}, 1400).then(() => setCompanion("ready"), () => setCompanion("missing"));
+    const transferId = new URLSearchParams(location.search).get("import");
+    if (!transferId) return;
+    setStatus("loading"); setProgress(24);
+    companionRequest("consume", { transferId }, 5000).then((imported) => {
+      setConversation(imported as Conversation); setProgress(100); setStatus("ready"); setCompanion("ready");
+      history.replaceState({}, "", location.pathname);
+      requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    }).catch((reason) => { setError(reason instanceof Error ? reason.message : "The browser import could not be received."); setStatus("error"); setProgress(0); setCompanion("ready"); });
+  }, []);
 
   async function processConversation(event: React.FormEvent) {
     event.preventDefault();
     if (!detected) { setError("Paste a ChatGPT conversation URL, such as chatgpt.com/c/… or chatgpt.com/share/…"); setStatus("error"); return; }
+    if (companion !== "ready") { setError("pAIcture Companion is required before importing. Install it, sign in to ChatGPT in this browser, and reload this page."); setStatus("error"); return; }
     setStatus("loading"); setError(""); setConversation(null); setProgress(18);
     const timer = window.setInterval(() => setProgress((value) => Math.min(value + 9, 86)), 420);
     try {
-      const isPrivateConversation = /\/(?:g\/[^/]+\/)?c\//i.test(new URL(url.trim()).pathname);
-      if (isPrivateConversation) {
-        try {
-          await companionRequest("ping", undefined, 1200);
-          const imported = await companionRequest("extract", url.trim(), 60000) as Conversation;
-          setConversation(imported); setProgress(100); setStatus("ready");
-          requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-          return;
-        } catch (fallbackError) {
-          throw new Error(`${fallbackError instanceof Error ? fallbackError.message : "Authenticated browser import failed."} Install or enable pAIcture Companion, sign in to ChatGPT in the same browser, then try again.`);
-        }
-      }
-      const response = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url.trim() }) });
-      const responseText = await response.text();
-      let data: ExtractResponse;
-      try { data = JSON.parse(responseText) as ExtractResponse; }
-      catch {
-        if (response.status === 401 || /sign in required/i.test(responseText)) throw new Error("Your pAIcture session is not signed in. Sign in to the site, then try the link again.");
-        throw new Error(`pAIcture received ${response.headers.get("content-type") || "a non-JSON response"} (HTTP ${response.status}) instead of extraction data.`);
-      }
-      if (!response.ok) {
-        if (detected === "chatgpt" && data.browserFallback) {
-          try {
-            await companionRequest("ping", undefined, 900);
-            data = await companionRequest("extract", url.trim(), 60000) as Conversation;
-          } catch (fallbackError) {
-            throw new Error(`${data.error || "Direct extraction was blocked."} ${fallbackError instanceof Error ? fallbackError.message : ""} Download the companion below to enable browser-assisted structured extraction.`);
-          }
-        } else throw new Error(data.error || "We could not read this conversation.");
-      }
-      setConversation(data); setProgress(100); setStatus("ready");
+      const imported = await companionRequest("extract", { url: url.trim() }, 60000) as Conversation;
+      setConversation(imported); setProgress(100); setStatus("ready");
       requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "We could not read this conversation."); setStatus("error"); setProgress(0); }
     finally { clearInterval(timer); }
@@ -141,10 +124,10 @@ export default function Home() {
 
   return <main>
     <header className="site-header"><a className="brand" href="#top" aria-label="pAIcture home"><span className="brand-mark">p</span><span>pAIcture</span></a><div className="header-meta"><span className="status-dot" /> Early access</div><button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}><Sun size={16} /><span className="toggle-track"><span className="toggle-thumb" /></span><Moon size={16} /></button></header>
-    <section id="top" className="hero"><div className="eyebrow"><Sparkles size={14} /> AI conversations, beautifully kept</div><h1>From shared chat<br />to <em>finished document.</em></h1><p className="hero-copy">Turn public AI conversations into polished PDFs or high-resolution images—without losing the structure that makes them useful.</p>
-      <form className="link-card" onSubmit={processConversation}><label htmlFor="conversation-url">Paste a ChatGPT conversation URL</label><div className={`url-field ${status === "error" ? "invalid" : ""}`}><Link2 size={20} /><input id="conversation-url" value={url} onChange={(event) => { setUrl(event.target.value); if (status === "error") setStatus("idle"); }} placeholder="https://chatgpt.com/c/… or /share/…" autoComplete="url" />{detected && <span className="detected"><span>{platforms[detected].mark}</span>{platforms[detected].name}</span>}<button type="submit" disabled={status === "loading"}>{status === "loading" ? <LoaderCircle className="spin" size={20} /> : <ArrowRight size={20} />}</button></div><p className="paste-help">Private conversations are read inside your signed-in browser by pAIcture Companion. Your ChatGPT cookies are never sent to pAIcture.</p>
+    <section id="top" className="hero"><div className="eyebrow"><Sparkles size={14} /> ChatGPT conversations, beautifully kept</div><h1>From ChatGPT<br />to <em>finished document.</em></h1><p className="hero-copy">Import a conversation through your signed-in browser, review every message, then export a polished PDF or high-resolution image set.</p>
+      <form className="link-card" onSubmit={processConversation}><div className={`companion-state ${companion}`}><span className="status-dot" /><strong>{companion === "ready" ? "Companion connected" : companion === "checking" ? "Checking Companion…" : "Companion required"}</strong>{companion === "missing" ? <a href="/paicture-companion.zip" download>Download Companion</a> : <span>{companion === "ready" ? "Authenticated browser import is ready." : ""}</span>}</div>{companion === "missing" ? <div className="companion-setup"><strong>One-time browser setup</strong><ol><li>Download and unzip Companion.</li><li>Open <code>chrome://extensions</code> or <code>edge://extensions</code>.</li><li>Enable Developer mode, choose Load unpacked, and select the unzipped folder.</li><li>Reload pAIcture. You can then paste a URL or click the pAIcture toolbar icon while viewing a ChatGPT conversation.</li></ol></div> : null}<label htmlFor="conversation-url">Paste a ChatGPT conversation URL</label><div className={`url-field ${status === "error" ? "invalid" : ""}`}><Link2 size={20} /><input id="conversation-url" value={url} onChange={(event) => { setUrl(event.target.value); if (status === "error") setStatus("idle"); }} placeholder="https://chatgpt.com/c/… or /share/…" autoComplete="url" />{detected && <span className="detected"><span>{platforms[detected].mark}</span>{platforms[detected].name}</span>}<button type="submit" disabled={status === "loading" || companion !== "ready"}>{status === "loading" ? <LoaderCircle className="spin" size={20} /> : <ArrowRight size={20} />}</button></div><p className="paste-help">All imports run inside your signed-in browser. No request is sent from pAIcture's server to ChatGPT, and your ChatGPT cookies never leave the browser.</p>
         {status === "loading" && <div className="progress-wrap"><div className="progress-line"><span style={{ width: `${progress}%` }} /></div><p>Reading the conversation and preserving its structure… <strong>{progress}%</strong></p></div>}
-        {status === "error" && <div className="error-note"><strong>We couldn’t complete this import.</strong><span>{error}</span>{detected === "chatgpt" && error.toLowerCase().includes("companion") ? <a href="/paicture-companion.zip" download>Download pAIcture Companion</a> : null}</div>}
+        {status === "error" && <div className="error-note"><strong>We couldn’t complete this import.</strong><span>{error}</span></div>}
         <div className="supported"><span>Current focus</span><div><i>{platforms.chatgpt.mark}</i>ChatGPT</div><div>Public and signed-in conversations</div></div></form>
       <div className="trust-row"><span><ShieldCheck size={17} />Processed only when you ask</span><span><Check size={17} />Formatting preserved</span><span><Check size={17} />No public gallery</span></div></section>
     {conversation ? <section id="preview" className="workspace"><div className="workspace-heading"><div><span className="section-index">01 / Preview</span><h2>Review before export</h2><p>Check every message, image, table, and code block before creating the final file.</p></div><div className="platform-pill"><span>{platforms[conversation.platform].mark}</span>{platforms[conversation.platform].name}</div></div>

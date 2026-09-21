@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "pAIcture Companion",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Imports a selected ChatGPT conversation from your signed-in browser into pAIcture.",
-  "permissions": ["tabs", "scripting"],
+  "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": ["https://chatgpt.com/*"],
   "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Export this conversation with pAIcture" },
   "content_scripts": [
     {
       "matches": [
