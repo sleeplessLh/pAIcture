@@ -1,12 +1,12 @@
-import { adapters } from "../lib/conversation/adapters";
+import { readFile } from "node:fs/promises";
+import { adapters, parseChatGptShareHtml } from "../lib/conversation/adapters";
 
 const source = process.argv[2];
 if (!source) throw new Error("Pass a public ChatGPT share URL.");
 
-const adapter = adapters.find((candidate) => candidate.platform === "chatgpt");
-if (!adapter) throw new Error("ChatGPT adapter is not registered.");
-
-const result = await adapter.extract(new URL(source));
+const result = source.endsWith(".html")
+  ? parseChatGptShareHtml(await readFile(source, "utf8"))
+  : await adapters[0].extract(new URL(source));
 const plain = result.messages.map((message) => ({
   role: message.role,
   text: message.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),

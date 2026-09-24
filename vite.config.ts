@@ -16,6 +16,10 @@ const managedLinux = readExecutionProfile() === "managed-linux";
 const localBindingConfig = {
   main: "vinext/server/fetch-handler",
   compatibility_flags: ["nodejs_compat"],
+  vars: {
+    ...(process.env.CHATGPT_EXTRACTOR_URL ? { CHATGPT_EXTRACTOR_URL: process.env.CHATGPT_EXTRACTOR_URL } : {}),
+    ...(process.env.CHATGPT_EXTRACTOR_TOKEN ? { CHATGPT_EXTRACTOR_TOKEN: process.env.CHATGPT_EXTRACTOR_TOKEN } : {}),
+  },
   d1_databases: d1
     ? [
         {
