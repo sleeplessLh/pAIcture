@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
 import { documentCssVariables } from "@/lib/document-theme";
+import { sanitizeForExportHtml } from "@/lib/conversation/sanitize";
 
 type Message = { id: string; role: "user" | "assistant"; html: string };
 type Props = { title: string; platformName: string; messages: Message[]; dateLabel: string };
@@ -18,7 +19,7 @@ export const ConversationDocument = forwardRef<HTMLDivElement, Props>(function C
         {messages.map((message) => (
           <article className={`conversation-message ${message.role}`} key={message.id}>
             <div className="conversation-role">{message.role === "user" ? "You" : platformName}</div>
-            <div className="conversation-message-content" dangerouslySetInnerHTML={{ __html: message.html }} />
+            <div className="conversation-message-content" dangerouslySetInnerHTML={{ __html: sanitizeForExportHtml(message.html) }} />
           </article>
         ))}
       </div>

@@ -18,6 +18,24 @@ function detectPlatform(value: string): Platform | null {
   return null;
 }
 
+async function waitForDocumentReady(root: HTMLElement) {
+  await document.fonts.ready;
+  await Promise.all([...root.querySelectorAll("img")].map((image) => image.complete ? Promise.resolve() : new Promise<void>((resolve) => {
+    image.addEventListener("load", () => resolve(), { once: true });
+    image.addEventListener("error", () => resolve(), { once: true });
+  })));
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(href), 2_000);
+}
+
 export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [url, setUrl] = useState("");
@@ -33,7 +51,8 @@ export default function Home() {
 
   useEffect(() => {
     const saved = localStorage.getItem("paicture-theme");
-    setTheme(saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
+    const preferred = saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+    queueMicrotask(() => setTheme(preferred));
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("paicture-theme", theme); }, [theme]);
 
@@ -56,19 +75,33 @@ export default function Home() {
   async function exportDocument() {
     if (!conversation || !previewRef.current) return;
     setExporting(true);
-    const { default: html2canvas } = await import("html2canvas");
     try {
       const slug = conversation.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "conversation";
       const source = previewRef.current;
       source.classList.add("export-capture");
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await waitForDocumentReady(source);
+      if (format === "pdf") {
+        const response = await fetch("/api/export/pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ html: source.outerHTML }),
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null) as { error?: string } | null;
+          throw new Error(payload?.error || "Unable to generate this PDF right now.");
+        }
+        downloadBlob(await response.blob(), `${slug}.pdf`);
+        console.info("[PDF] Vector export complete");
+        return;
+      }
+      const { default: html2canvas } = await import("html2canvas");
       const { width: pageWidth, height: pageHeight, marginTop, marginX, marginBottom } = documentTheme.page;
       const printableHeight = pageHeight - marginTop - marginBottom;
       const totalHeight = source.scrollHeight;
-      const captureScale = Math.min(2, 30000 / Math.max(totalHeight, 1));
-      const fullCanvas = await html2canvas(source, { scale: captureScale, backgroundColor: "#ffffff", useCORS: true, logging: false, windowWidth: source.scrollWidth, windowHeight: totalHeight });
+      const captureScale = 2;
       const pages = [] as HTMLCanvasElement[];
       const sourceTop = source.getBoundingClientRect().top;
+      const sourceTopInDocument = sourceTop + window.scrollY;
       const elementBreaks = [...source.querySelectorAll(".conversation-message, .conversation-message-content > *:not(:first-child), tr")]
         .map((element) => Math.round(element.getBoundingClientRect().top - sourceTop))
         .filter((position) => position > 0 && position < totalHeight);
@@ -102,7 +135,21 @@ export default function Home() {
         if (context) {
           context.fillStyle = "#ffffff";
           context.fillRect(0, 0, canvas.width, canvas.height);
-          context.drawImage(fullCanvas, 0, Math.floor(offset * captureScale), fullCanvas.width, Math.ceil(sliceHeight * captureScale), marginX * captureScale, marginTop * captureScale, pageWidth * captureScale - marginX * captureScale * 2, sliceHeight * captureScale);
+          const slice = await html2canvas(source, {
+            scale: captureScale,
+            backgroundColor: "#ffffff",
+            useCORS: true,
+            logging: false,
+            x: source.getBoundingClientRect().left + window.scrollX,
+            y: sourceTopInDocument + offset,
+            width: source.scrollWidth,
+            height: sliceHeight,
+            windowWidth: document.documentElement.scrollWidth,
+            windowHeight: Math.max(document.documentElement.scrollHeight, totalHeight),
+            scrollX: 0,
+            scrollY: 0,
+          });
+          context.drawImage(slice, 0, 0, slice.width, slice.height, marginX * captureScale, marginTop * captureScale, pageWidth * captureScale - marginX * captureScale * 2, sliceHeight * captureScale);
           context.fillStyle = "#9a9a95";
           context.font = `${10 * captureScale}px ${documentTheme.fontFamily}`;
           context.textAlign = "left";
@@ -113,23 +160,12 @@ export default function Home() {
         pages.push(canvas);
         offset = end;
       }
-      console.info("[PDF] Render complete", { pages: pages.length, sourceHeight: totalHeight, scale: captureScale });
-      if (format === "pdf") {
-        const { jsPDF } = await import("jspdf");
-        const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
-        const pdfWidth = pdf.internal.pageSize.getWidth(), pdfHeight = pdf.internal.pageSize.getHeight();
-        pages.forEach((canvas, index) => {
-          if (index) pdf.addPage();
-          const height = Math.min(pdfHeight, canvas.height * pdfWidth / canvas.width);
-          pdf.addImage(canvas.toDataURL("image/jpeg", .94), "JPEG", 0, 0, pdfWidth, height, undefined, "FAST");
-        });
-        pdf.save(`${slug}.pdf`);
-        console.info("[PDF] Export complete", { pages: pages.length });
-      } else {
-        for (let page = 0; page < pages.length; page++) {
-          const link = document.createElement("a"); link.download = `${slug}-${page + 1}.png`; link.href = pages[page].toDataURL("image/png", 1); link.click();
-          await new Promise((resolve) => setTimeout(resolve, 180));
-        }
+      console.info("[PNG] Paginated render complete", { pages: pages.length, sourceHeight: totalHeight, scale: captureScale });
+      for (let page = 0; page < pages.length; page++) {
+        const blob = await new Promise<Blob | null>((resolve) => pages[page].toBlob(resolve, "image/png"));
+        if (!blob) throw new Error("PNG encoding failed.");
+        downloadBlob(blob, `${slug}-${String(page + 1).padStart(3, "0")}.png`);
+        await new Promise((resolve) => setTimeout(resolve, 180));
       }
     } finally { previewRef.current?.classList.remove("export-capture"); setExporting(false); }
   }
@@ -144,7 +180,7 @@ export default function Home() {
       <div className="trust-row"><span><ShieldCheck size={17} />Processed only when you ask</span><span><Check size={17} />Formatting preserved</span><span><Check size={17} />No public gallery</span></div></section>
     {conversation ? <section id="preview" className="workspace"><div className="workspace-heading"><div><span className="section-index">01 / Preview</span><h2>Review before export</h2><p>Check every message, image, table, and code block before creating the final file.</p></div><div className="platform-pill"><span>{platforms[conversation.platform].mark}</span>{platforms[conversation.platform].name}</div></div>
       {conversation.warnings?.length ? <div className="warning"><strong>Import note</strong>{conversation.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}<div className="preview-shell"><div className="document-sheet"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={conversation.messages} dateLabel={documentDate} /></div>
-      <aside className="export-panel"><span className="section-index">02 / Export</span><h3>Choose your format</h3><button className={format === "pdf" ? "selected" : ""} onClick={() => setFormat("pdf")}><FileText size={22} /><span><strong>PDF document</strong><small>High-resolution, paginated document</small></span>{format === "pdf" && <Check size={17} />}</button><button className={format === "images" ? "selected" : ""} onClick={() => setFormat("images")}><FileImage size={22} /><span><strong>PNG images</strong><small>High-resolution, split when needed</small></span>{format === "images" && <Check size={17} />}</button><div className="quality"><span>Quality</span><button>High <ChevronDown size={14} /></button></div><button className="export-button" onClick={exportDocument} disabled={exporting}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? "Preparing file…" : `Export ${format === "pdf" ? "PDF" : "images"}`}</button><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p></aside></div></section>
+      <aside className="export-panel"><span className="section-index">02 / Export</span><h3>Choose your format</h3><button className={format === "pdf" ? "selected" : ""} onClick={() => setFormat("pdf")}><FileText size={22} /><span><strong>PDF document</strong><small>Sharp, selectable text</small></span>{format === "pdf" && <Check size={17} />}</button><button className={format === "images" ? "selected" : ""} onClick={() => setFormat("images")}><FileImage size={22} /><span><strong>PNG images</strong><small>High-resolution, split when needed</small></span>{format === "images" && <Check size={17} />}</button><div className="quality"><span>Quality</span><button>High <ChevronDown size={14} /></button></div><button className="export-button" onClick={exportDocument} disabled={exporting}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? "Preparing file…" : `Export ${format === "pdf" ? "PDF" : "images"}`}</button><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p></aside></div></section>
       : <section className="process"><span className="section-index">How it works</span><div className="process-grid"><article><b>01</b><h2>Share</h2><p>Open a ChatGPT conversation and create its public shared link.</p></article><article><b>02</b><h2>Import</h2><p>Paste the link so pAIcture can reconstruct the structured conversation.</p></article><article><b>03</b><h2>Export</h2><p>Review every turn, then download a PDF or high-resolution PNG pages.</p></article></div></section>}
     <footer><a className="brand" href="#top"><span className="brand-mark">p</span><span>pAIcture</span></a><p>Make AI conversations portable.</p><span>© 2026 pAIcture</span></footer>
   </main>;
