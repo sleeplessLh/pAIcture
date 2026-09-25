@@ -69,10 +69,21 @@ export default function Home() {
       const fullCanvas = await html2canvas(source, { scale: captureScale, backgroundColor: "#ffffff", useCORS: true, logging: false, windowWidth: source.scrollWidth, windowHeight: totalHeight });
       const pages = [] as HTMLCanvasElement[];
       const sourceTop = source.getBoundingClientRect().top;
-      const safeBreaks = [...source.querySelectorAll(".conversation-message, .conversation-message-content > *:not(:first-child), tr")]
+      const elementBreaks = [...source.querySelectorAll(".conversation-message, .conversation-message-content > *:not(:first-child), tr")]
         .map((element) => Math.round(element.getBoundingClientRect().top - sourceTop))
-        .filter((position) => position > 0 && position < totalHeight)
-        .sort((a, b) => a - b);
+        .filter((position) => position > 0 && position < totalHeight);
+      const lineBreaks = [...source.querySelectorAll(".conversation-message-content p, .conversation-message-content li, .conversation-message-content pre")]
+        .flatMap((element) => {
+          const rect = element.getBoundingClientRect();
+          const top = rect.top - sourceTop;
+          const bottom = rect.bottom - sourceTop;
+          const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
+          if (!Number.isFinite(lineHeight) || rect.height < lineHeight * 3) return [];
+          const positions: number[] = [];
+          for (let position = top + lineHeight * 2; position < bottom - lineHeight; position += lineHeight) positions.push(Math.round(position));
+          return positions;
+        });
+      const safeBreaks = [...elementBreaks, ...lineBreaks].sort((a, b) => a - b);
       const protectedRanges = [...source.querySelectorAll("pre, blockquote, table, img")]
         .map((element) => { const rect = element.getBoundingClientRect(); return { top: Math.round(rect.top - sourceTop), bottom: Math.round(rect.bottom - sourceTop) }; })
         .filter((range) => range.bottom - range.top < printableHeight);
