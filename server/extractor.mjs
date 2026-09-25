@@ -1,4 +1,7 @@
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { exportDocumentCss } from "../lib/export-document-style.mjs";
 
@@ -11,6 +14,13 @@ const headers = {
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
 };
+
+const cjkCssPath = fileURLToPath(new URL("../node_modules/@fontsource-variable/noto-sans-sc/index.css", import.meta.url));
+const cjkCssDirectory = dirname(cjkCssPath);
+const cjkFontCss = readFileSync(cjkCssPath, "utf8").replace(/url\((\.\/files\/[^)]+)\)/g, (_, relativePath) => {
+  const font = readFileSync(join(cjkCssDirectory, relativePath));
+  return `url(data:font/woff2;base64,${font.toString("base64")})`;
+});
 
 function json(response, status, body) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -46,7 +56,7 @@ createServer(async (request, response) => {
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage({ viewport: { width: 794, height: 1123 }, deviceScaleFactor: 1 });
-        await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${exportDocumentCss}</style></head><body>${safeDocument}</body></html>`, { waitUntil: "load" });
+        await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${cjkFontCss}\n${exportDocumentCss}</style></head><body>${safeDocument}</body></html>`, { waitUntil: "load" });
         await page.evaluate(async () => {
           await document.fonts.ready;
           await Promise.all([...document.images].map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => {
