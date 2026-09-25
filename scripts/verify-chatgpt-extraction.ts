@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { adapters, parseChatGptShareHtml } from "../lib/conversation/adapters";
 
 const source = process.argv[2];
 if (!source) throw new Error("Pass a public ChatGPT share URL.");
 
-const result = source.endsWith(".html")
-  ? parseChatGptShareHtml(await readFile(source, "utf8"))
+const result = existsSync(resolve(source))
+  ? parseChatGptShareHtml(await readFile(resolve(source), "utf8"))
   : await adapters[0].extract(new URL(source));
 const plain = result.messages.map((message) => ({
   role: message.role,

@@ -44,7 +44,9 @@ function findConversation(value: unknown, seen = new Set<unknown>()): Record<str
   if (!value || typeof value !== "object" || seen.has(value)) return null;
   seen.add(value);
   const record = value as Record<string, unknown>;
-  if (record.mapping && typeof record.mapping === "object" && (record.current_node || record.title)) return record;
+  const mapping = record.mapping && typeof record.mapping === "object" ? record.mapping as Record<string, unknown> : null;
+  const hasMessageNodes = mapping && Object.values(mapping).some((node) => node && typeof node === "object" && "message" in node);
+  if (mapping && (record.current_node || record.title || hasMessageNodes)) return record;
   for (const child of Object.values(record)) { const found = findConversation(child, seen); if (found) return found; }
   return null;
 }
@@ -130,13 +132,31 @@ const chatgpt: ConversationAdapter = {
 export function parseChatGptShareHtml(html: string, sourceUrl?: string): ExtractedConversation {
   const enqueue = /window\.__reactRouterContext\.streamController\.enqueue\(((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*'))\)/g;
   let conversation: Record<string, unknown> | null = null;
+  const streamedPayloads: string[] = [];
   for (const match of html.matchAll(enqueue)) {
     try {
       const text = match[1].startsWith('"') ? JSON.parse(match[1]) as string : match[1].slice(1, -1).replace(/\\'/g, "'");
-      const flat = JSON.parse(text);
-      if (Array.isArray(flat)) conversation = findConversation(decodeDevalue(flat));
+      streamedPayloads.push(text);
+      const payload = JSON.parse(text);
+      conversation = findConversation(Array.isArray(payload) ? decodeDevalue(payload) : payload);
       if (conversation) break;
     } catch {}
+  }
+  if (!conversation && streamedPayloads.length > 1) {
+    try {
+      const payload = JSON.parse(streamedPayloads.join(""));
+      conversation = findConversation(Array.isArray(payload) ? decodeDevalue(payload) : payload);
+    } catch {}
+  }
+  if (!conversation) {
+    const applicationJson = /<script\b[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    for (const match of html.matchAll(applicationJson)) {
+      try {
+        const payload = JSON.parse(match[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
+        conversation = findConversation(payload);
+        if (conversation) break;
+      } catch {}
+    }
   }
   const messages = conversation ? messagesFromConversation(conversation) : messagesFromRenderedChatGptHtml(html);
   if (!messages.length) throw new Error("ChatGPT returned the conversation metadata, but no user or assistant messages could be decoded.");
