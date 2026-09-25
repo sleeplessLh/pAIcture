@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Check, ChevronDown, Download, FileImage, FileText, Link2, LoaderCircle, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { ConversationDocument } from "@/components/conversation-document";
 import { documentTheme } from "@/lib/document-theme";
+import { groupConversationExchanges, messagesForSelectedExchanges, type ConversationExchange } from "@/lib/conversation/exchanges";
 
 type Platform = "chatgpt";
 type Message = { id: string; role: "user" | "assistant"; html: string };
@@ -43,6 +44,22 @@ function exportFilename(title: string) {
   return title.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 80) || "paicture-chatgpt-export";
 }
 
+function exchangePreview(messages: Message[], limit = 150) {
+  const text = messages.map((message) => message.html)
+    .join(" ")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text;
+}
+
 export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [url, setUrl] = useState("");
@@ -50,12 +67,18 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [selectedExchangeIds, setSelectedExchangeIds] = useState<string[]>([]);
   const [format, setFormat] = useState<"pdf" | "images">("pdf");
   const [exporting, setExporting] = useState(false);
   const [exportPhase, setExportPhase] = useState<"idle" | "rendering" | "downloading" | "done" | "error">("idle");
   const [exportError, setExportError] = useState("");
   const previewRef = useRef<HTMLDivElement>(null);
   const detected = useMemo(() => detectPlatform(url.trim()), [url]);
+  const exchanges = useMemo(() => groupConversationExchanges(conversation?.messages || []), [conversation]);
+  const selectedMessages = useMemo(
+    () => messagesForSelectedExchanges(exchanges, selectedExchangeIds),
+    [exchanges, selectedExchangeIds],
+  );
   const [documentDate] = useState(() => new Intl.DateTimeFormat("en", { year: "numeric", month: "long", day: "numeric" }).format(new Date()));
 
   useEffect(() => {
@@ -68,21 +91,28 @@ export default function Home() {
   async function processConversation(event: React.FormEvent) {
     event.preventDefault();
     if (!detected) { setError("Paste a public ChatGPT shared link beginning with https://chatgpt.com/share/"); setStatus("error"); return; }
-    setStatus("loading"); setError(""); setConversation(null); setProgress(18);
+    setStatus("loading"); setError(""); setConversation(null); setSelectedExchangeIds([]); setProgress(18);
     const timer = window.setInterval(() => setProgress((value) => Math.min(value + 9, 86)), 420);
     try {
       const response = await fetch("/api/import/chatgpt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url.trim() }) });
       const payload = await response.json() as Conversation & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Unable to import this shared conversation.");
       const imported = payload as Conversation;
-      setConversation(imported); setProgress(100); setStatus("ready");
+      const importedExchanges = groupConversationExchanges(imported.messages);
+      setConversation(imported);
+      setSelectedExchangeIds(importedExchanges.length ? [importedExchanges.at(-1)!.id] : []);
+      setProgress(100); setStatus("ready");
       requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "We could not read this conversation."); setStatus("error"); setProgress(0); }
     finally { clearInterval(timer); }
   }
 
   async function exportDocument() {
-    if (!conversation || !previewRef.current) return;
+    if (!conversation || !previewRef.current || !selectedMessages.length) {
+      setExportError("Select at least one complete question and answer before exporting.");
+      setExportPhase("error");
+      return;
+    }
     setExporting(true);
     setExportPhase("rendering");
     setExportError("");
@@ -205,6 +235,18 @@ export default function Home() {
     } finally { previewRef.current?.classList.remove("export-capture"); setExporting(false); }
   }
 
+  function updateSelection(next: string[]) {
+    setSelectedExchangeIds(next);
+    setExportPhase("idle");
+    setExportError("");
+  }
+
+  function toggleExchange(exchange: ConversationExchange) {
+    updateSelection(selectedExchangeIds.includes(exchange.id)
+      ? selectedExchangeIds.filter((id) => id !== exchange.id)
+      : [...selectedExchangeIds, exchange.id]);
+  }
+
   return <main>
     <header className="site-header"><a className="brand" href="#top" aria-label="pAIcture home"><span className="brand-mark">p</span><span>pAIcture</span></a><div className="header-meta"><span className="status-dot" /> Early access</div><button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}><Sun size={16} /><span className="toggle-track"><span className="toggle-thumb" /></span><Moon size={16} /></button></header>
     <section id="top" className="hero"><div className="eyebrow"><Sparkles size={14} /> ChatGPT conversations, beautifully kept</div><h1>From ChatGPT<br />to <em>finished document.</em></h1><p className="hero-copy">Create a ChatGPT shared link, paste it here, review every message, then export a polished PDF or high-resolution image set.</p>
@@ -213,9 +255,11 @@ export default function Home() {
         {status === "error" && <div className="error-note"><strong>We couldn’t complete this import.</strong><span>{error}</span></div>}
         <div className="supported"><span>Current focus</span><div><i>{platforms.chatgpt.mark}</i>ChatGPT</div><div>Public shared conversations only</div></div></form>
       <div className="trust-row"><span><ShieldCheck size={17} />Processed only when you ask</span><span><Check size={17} />Formatting preserved</span><span><Check size={17} />No public gallery</span></div></section>
-    {conversation ? <section id="preview" className="workspace"><div className="workspace-heading"><div><span className="section-index">01 / Preview</span><h2>Review before export</h2><p>Check every message, image, table, and code block before creating the final file.</p></div><div className="platform-pill"><span>{platforms[conversation.platform].mark}</span>{platforms[conversation.platform].name}</div></div>
-      {conversation.warnings?.length ? <div className="warning"><strong>Import note</strong>{conversation.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}<div className="preview-shell"><div className="document-sheet"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={conversation.messages} dateLabel={documentDate} /></div>
-      <aside className="export-panel"><span className="section-index">02 / Export</span><h3>Choose your format</h3><button type="button" className={format === "pdf" ? "selected" : ""} onClick={() => { setFormat("pdf"); setExportPhase("idle"); setExportError(""); }}><FileText size={22} /><span><strong>PDF document</strong><small>Sharp, selectable text</small></span>{format === "pdf" && <Check size={17} />}</button><button type="button" className={format === "images" ? "selected" : ""} onClick={() => { setFormat("images"); setExportPhase("idle"); setExportError(""); }}><FileImage size={22} /><span><strong>PNG images</strong><small>High-resolution, split when needed</small></span>{format === "images" && <Check size={17} />}</button><div className="quality"><span>Quality</span><button type="button">High <ChevronDown size={14} /></button></div><button type="button" className="export-button" onClick={exportDocument} disabled={exporting}>{exporting ? <LoaderCircle className="spin" size={18} /> : exportPhase === "done" ? <Check size={18} /> : <Download size={18} />}{exporting ? exportPhase === "downloading" ? "Downloading…" : `Generating ${format === "pdf" ? "PDF" : "PNG"}…` : exportPhase === "done" ? "Download started" : `Export ${format === "pdf" ? "PDF" : "images"}`}</button>{exportError && <p className="export-error" role="alert">{exportError}</p>}<p className="export-status" aria-live="polite">{exportPhase === "done" ? "Your browser download has started." : exporting ? "Please keep this tab open while the document is prepared." : ""}</p><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p></aside></div></section>
+    {conversation ? <section id="preview" className="workspace"><div className="workspace-heading"><div><span className="section-index">01 / Select</span><h2>Choose what to export</h2><p>Select complete question-and-answer exchanges. Your preview updates immediately.</p></div><div className="platform-pill"><span>{platforms[conversation.platform].mark}</span>{platforms[conversation.platform].name}</div></div>
+      {conversation.warnings?.length ? <div className="warning"><strong>Import note</strong>{conversation.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
+      {exchanges.length ? <section className="exchange-selector" aria-labelledby="exchange-selector-title"><div className="exchange-selector-head"><div><h3 id="exchange-selector-title">Choose Q&amp;A exchanges</h3><p><strong>{selectedExchangeIds.length}</strong> of {exchanges.length} selected · Complete answers are always exported.</p></div><div className="exchange-actions"><button type="button" onClick={() => updateSelection(exchanges.map(({ id }) => id))}>Select all</button><button type="button" onClick={() => updateSelection([])}>Clear all</button><button type="button" onClick={() => updateSelection([exchanges.at(-1)!.id])}>Latest only</button></div></div><div className="exchange-list">{exchanges.map((exchange) => { const selected = selectedExchangeIds.includes(exchange.id); return <label className={`exchange-option ${selected ? "selected" : ""}`} key={exchange.id}><input type="checkbox" checked={selected} onChange={() => toggleExchange(exchange)} /><span className="exchange-number">{String(exchange.index).padStart(2, "0")}</span><span className="exchange-copy"><strong>{exchangePreview(exchange.userMessages) || "Question"}</strong><small>{exchangePreview(exchange.assistantMessages) || "Answer"}</small></span><span className="exchange-check" aria-hidden="true">{selected ? <Check size={16} /> : null}</span></label>; })}</div></section> : <div className="selection-warning" role="alert"><strong>No complete Q&amp;A exchange was found.</strong><span>pAIcture will not export the full conversation automatically. Try another complete shared conversation.</span></div>}
+      <div className="preview-shell"><div><div className="preview-label"><span className="section-index">02 / Preview</span><span>{selectedMessages.length ? `${selectedExchangeIds.length} exchange${selectedExchangeIds.length === 1 ? "" : "s"} selected` : "Nothing selected"}</span></div>{selectedMessages.length ? <div className="document-sheet"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={selectedMessages} dateLabel={documentDate} /></div> : <div className="empty-preview"><strong>Select at least one Q&amp;A exchange</strong><span>The preview and exported file will contain exactly what you select above.</span></div>}</div>
+      <aside className="export-panel"><span className="section-index">03 / Export</span><h3>Choose your format</h3><button type="button" className={format === "pdf" ? "selected" : ""} onClick={() => { setFormat("pdf"); setExportPhase("idle"); setExportError(""); }}><FileText size={22} /><span><strong>PDF document</strong><small>Sharp, selectable text</small></span>{format === "pdf" && <Check size={17} />}</button><button type="button" className={format === "images" ? "selected" : ""} onClick={() => { setFormat("images"); setExportPhase("idle"); setExportError(""); }}><FileImage size={22} /><span><strong>PNG images</strong><small>High-resolution, split when needed</small></span>{format === "images" && <Check size={17} />}</button><div className="quality"><span>Quality</span><button type="button">High <ChevronDown size={14} /></button></div><button type="button" className="export-button" onClick={exportDocument} disabled={exporting || !selectedMessages.length}>{exporting ? <LoaderCircle className="spin" size={18} /> : exportPhase === "done" ? <Check size={18} /> : <Download size={18} />}{exporting ? exportPhase === "downloading" ? "Downloading…" : `Generating ${format === "pdf" ? "PDF" : "PNG"}…` : exportPhase === "done" ? "Download started" : `Export ${format === "pdf" ? "PDF" : "images"}`}</button>{exportError && <p className="export-error" role="alert">{exportError}</p>}<p className="export-status" aria-live="polite">{exportPhase === "done" ? "Your browser download has started." : exporting ? "Please keep this tab open while the document is prepared." : !selectedMessages.length ? "Select content above to enable export." : ""}</p><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p></aside></div></section>
       : <section className="process"><span className="section-index">How it works</span><div className="process-grid"><article><b>01</b><h2>Share</h2><p>Open a ChatGPT conversation and create its public shared link.</p></article><article><b>02</b><h2>Import</h2><p>Paste the link so pAIcture can reconstruct the structured conversation.</p></article><article><b>03</b><h2>Export</h2><p>Review every turn, then download a PDF or high-resolution PNG pages.</p></article></div></section>}
     <footer><a className="brand" href="#top"><span className="brand-mark">p</span><span>pAIcture</span></a><p>Make AI conversations portable.</p><span>© 2026 pAIcture</span></footer>
   </main>;
