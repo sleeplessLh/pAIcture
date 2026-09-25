@@ -120,7 +120,6 @@ export default function Home() {
       const captureScale = 2;
       const pages = [] as HTMLCanvasElement[];
       const sourceTop = source.getBoundingClientRect().top;
-      const sourceTopInDocument = sourceTop + window.scrollY;
       const elementBreaks = [...source.querySelectorAll(".conversation-message, .conversation-message-content > *:not(:first-child), tr")]
         .map((element) => Math.round(element.getBoundingClientRect().top - sourceTop))
         .filter((position) => position > 0 && position < totalHeight);
@@ -159,8 +158,10 @@ export default function Home() {
             backgroundColor: "#ffffff",
             useCORS: true,
             logging: false,
-            x: source.getBoundingClientRect().left + window.scrollX,
-            y: sourceTopInDocument + offset,
+            // html2canvas crops relative to the requested element. Adding the
+            // document's page coordinates here skips content and clips the left edge.
+            x: 0,
+            y: offset,
             width: source.scrollWidth,
             height: sliceHeight,
             windowWidth: document.documentElement.scrollWidth,
