@@ -64,7 +64,7 @@ createServer(async (request, response) => {
           displayHeaderFooter: true,
           headerTemplate: "<span></span>",
           footerTemplate: `<div style="box-sizing:border-box;width:100%;padding:0 18mm;color:#8a8a85;font:9px Arial,sans-serif;display:flex;justify-content:space-between"><span>pAIcture</span><span class="pageNumber"></span></div>`,
-          margin: { top: "17mm", right: "18mm", bottom: "19mm", left: "18mm" },
+          margin: { top: "18mm", right: "18mm", bottom: "18mm", left: "18mm" },
           tagged: true,
           outline: true,
         });

@@ -32,8 +32,15 @@ function downloadBlob(blob: Blob, filename: string) {
   const link = document.createElement("a");
   link.href = href;
   link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  window.setTimeout(() => URL.revokeObjectURL(href), 2_000);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+}
+
+function exportFilename(title: string) {
+  return title.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 80) || "paicture-chatgpt-export";
 }
 
 export default function Home() {
@@ -45,6 +52,8 @@ export default function Home() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [format, setFormat] = useState<"pdf" | "images">("pdf");
   const [exporting, setExporting] = useState(false);
+  const [exportPhase, setExportPhase] = useState<"idle" | "rendering" | "downloading" | "done" | "error">("idle");
+  const [exportError, setExportError] = useState("");
   const previewRef = useRef<HTMLDivElement>(null);
   const detected = useMemo(() => detectPlatform(url.trim()), [url]);
   const [documentDate] = useState(() => new Intl.DateTimeFormat("en", { year: "numeric", month: "long", day: "numeric" }).format(new Date()));
@@ -75,11 +84,16 @@ export default function Home() {
   async function exportDocument() {
     if (!conversation || !previewRef.current) return;
     setExporting(true);
+    setExportPhase("rendering");
+    setExportError("");
+    console.info("[EXPORT] Download clicked", { format });
     try {
-      const slug = conversation.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "conversation";
+      const slug = exportFilename(conversation.title);
       const source = previewRef.current;
       source.classList.add("export-capture");
+      console.info("[EXPORT] Rendering conversation");
       await waitForDocumentReady(source);
+      console.info("[EXPORT] Render ready");
       if (format === "pdf") {
         const response = await fetch("/api/export/pdf", {
           method: "POST",
@@ -90,8 +104,13 @@ export default function Home() {
           const payload = await response.json().catch(() => null) as { error?: string } | null;
           throw new Error(payload?.error || "Unable to generate this PDF right now.");
         }
-        downloadBlob(await response.blob(), `${slug}.pdf`);
-        console.info("[PDF] Vector export complete");
+        const blob = await response.blob();
+        if (!blob.size || !blob.type.includes("pdf")) throw new Error("The PDF service returned an invalid file.");
+        console.info("[EXPORT] PDF Blob generated", { size: blob.size, type: blob.type });
+        setExportPhase("downloading");
+        downloadBlob(blob, `${slug}.pdf`);
+        setExportPhase("done");
+        console.info("[EXPORT] Download triggered", { filename: `${slug}.pdf` });
         return;
       }
       const { default: html2canvas } = await import("html2canvas");
@@ -161,12 +180,27 @@ export default function Home() {
         offset = end;
       }
       console.info("[PNG] Paginated render complete", { pages: pages.length, sourceHeight: totalHeight, scale: captureScale });
+      const pngFiles: Record<string, Uint8Array> = {};
       for (let page = 0; page < pages.length; page++) {
         const blob = await new Promise<Blob | null>((resolve) => pages[page].toBlob(resolve, "image/png"));
         if (!blob) throw new Error("PNG encoding failed.");
-        downloadBlob(blob, `${slug}-${String(page + 1).padStart(3, "0")}.png`);
-        await new Promise((resolve) => setTimeout(resolve, 180));
+        pngFiles[`${slug}-${String(page + 1).padStart(3, "0")}.png`] = new Uint8Array(await blob.arrayBuffer());
       }
+      setExportPhase("downloading");
+      if (pages.length === 1) {
+        downloadBlob(new Blob([pngFiles[Object.keys(pngFiles)[0]]], { type: "image/png" }), `${slug}.png`);
+      } else {
+        const { zipSync } = await import("fflate");
+        const archive = zipSync(pngFiles, { level: 6 });
+        downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${slug}-images.zip`);
+      }
+      setExportPhase("done");
+      console.info("[EXPORT] Download triggered", { pages: pages.length });
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "The export could not be generated.";
+      console.error("[EXPORT] Failed", reason);
+      setExportError(message);
+      setExportPhase("error");
     } finally { previewRef.current?.classList.remove("export-capture"); setExporting(false); }
   }
 
@@ -180,7 +214,7 @@ export default function Home() {
       <div className="trust-row"><span><ShieldCheck size={17} />Processed only when you ask</span><span><Check size={17} />Formatting preserved</span><span><Check size={17} />No public gallery</span></div></section>
     {conversation ? <section id="preview" className="workspace"><div className="workspace-heading"><div><span className="section-index">01 / Preview</span><h2>Review before export</h2><p>Check every message, image, table, and code block before creating the final file.</p></div><div className="platform-pill"><span>{platforms[conversation.platform].mark}</span>{platforms[conversation.platform].name}</div></div>
       {conversation.warnings?.length ? <div className="warning"><strong>Import note</strong>{conversation.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}<div className="preview-shell"><div className="document-sheet"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={conversation.messages} dateLabel={documentDate} /></div>
-      <aside className="export-panel"><span className="section-index">02 / Export</span><h3>Choose your format</h3><button className={format === "pdf" ? "selected" : ""} onClick={() => setFormat("pdf")}><FileText size={22} /><span><strong>PDF document</strong><small>Sharp, selectable text</small></span>{format === "pdf" && <Check size={17} />}</button><button className={format === "images" ? "selected" : ""} onClick={() => setFormat("images")}><FileImage size={22} /><span><strong>PNG images</strong><small>High-resolution, split when needed</small></span>{format === "images" && <Check size={17} />}</button><div className="quality"><span>Quality</span><button>High <ChevronDown size={14} /></button></div><button className="export-button" onClick={exportDocument} disabled={exporting}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? "Preparing file…" : `Export ${format === "pdf" ? "PDF" : "images"}`}</button><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p></aside></div></section>
+      <aside className="export-panel"><span className="section-index">02 / Export</span><h3>Choose your format</h3><button type="button" className={format === "pdf" ? "selected" : ""} onClick={() => { setFormat("pdf"); setExportPhase("idle"); setExportError(""); }}><FileText size={22} /><span><strong>PDF document</strong><small>Sharp, selectable text</small></span>{format === "pdf" && <Check size={17} />}</button><button type="button" className={format === "images" ? "selected" : ""} onClick={() => { setFormat("images"); setExportPhase("idle"); setExportError(""); }}><FileImage size={22} /><span><strong>PNG images</strong><small>High-resolution, split when needed</small></span>{format === "images" && <Check size={17} />}</button><div className="quality"><span>Quality</span><button type="button">High <ChevronDown size={14} /></button></div><button type="button" className="export-button" onClick={exportDocument} disabled={exporting}>{exporting ? <LoaderCircle className="spin" size={18} /> : exportPhase === "done" ? <Check size={18} /> : <Download size={18} />}{exporting ? exportPhase === "downloading" ? "Downloading…" : `Generating ${format === "pdf" ? "PDF" : "PNG"}…` : exportPhase === "done" ? "Download started" : `Export ${format === "pdf" ? "PDF" : "images"}`}</button>{exportError && <p className="export-error" role="alert">{exportError}</p>}<p className="export-status" aria-live="polite">{exportPhase === "done" ? "Your browser download has started." : exporting ? "Please keep this tab open while the document is prepared." : ""}</p><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p></aside></div></section>
       : <section className="process"><span className="section-index">How it works</span><div className="process-grid"><article><b>01</b><h2>Share</h2><p>Open a ChatGPT conversation and create its public shared link.</p></article><article><b>02</b><h2>Import</h2><p>Paste the link so pAIcture can reconstruct the structured conversation.</p></article><article><b>03</b><h2>Export</h2><p>Review every turn, then download a PDF or high-resolution PNG pages.</p></article></div></section>}
     <footer><a className="brand" href="#top"><span className="brand-mark">p</span><span>pAIcture</span></a><p>Make AI conversations portable.</p><span>© 2026 pAIcture</span></footer>
   </main>;

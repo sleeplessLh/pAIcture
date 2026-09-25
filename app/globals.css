@@ -19,3 +19,6 @@
 .conversation-message-content table{break-inside:auto}.conversation-message-content tr{break-inside:avoid}
 .conversation-message-content img{display:block;width:auto;max-width:100%;height:auto;max-height:230mm;object-fit:contain;position:static;margin:14px auto;break-inside:avoid}
 @media print{html,body{margin:0;padding:0}.conversation-document{width:100%;max-width:none;margin:0}.conversation-message{break-inside:auto}.conversation-message-content pre,.conversation-message-content table{break-inside:auto}.conversation-message-content blockquote,.conversation-message-content figure,.conversation-message-content img{break-inside:avoid}@page{size:A4 portrait;margin:17mm 18mm 19mm}}
+
+.export-status,.export-error{font-size:11px;line-height:1.5;margin:10px 2px 0}.export-status{color:var(--muted);min-height:1.5em}.export-error{color:#b7392e;background:color-mix(in srgb,#d34535 10%,transparent);padding:9px 10px;border-radius:7px}
+@media print{@page{size:A4 portrait;margin:18mm}}

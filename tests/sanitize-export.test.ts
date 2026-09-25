@@ -17,3 +17,10 @@ test("preserves legitimate human-readable text and markup", () => {
 test("removes bracketed internal markers conservatively", () => {
   assert.equal(sanitizeForExportHtml("<p>Before [filecite:abc123] after</p>"), "<p>Before  after</p>");
 });
+
+test("removes URL serialization wrappers but preserves the readable label and link", () => {
+  const input = '<p>来源：\uE200url\uE202OpenAI\uE202<a href="https://openai.com">https://openai.com</a>\uE201</p>';
+  const output = sanitizeForExportHtml(input);
+  assert.equal(output, '<p>来源：OpenAI: <a href="https://openai.com">https://openai.com</a></p>');
+  assert.doesNotMatch(output, /[\uE200\uE201\uE202]/u);
+});

@@ -20,11 +20,15 @@ export function sanitizeHtml(input: string) {
  */
 export function sanitizeForExportHtml(input: string) {
   return sanitizeHtml(input)
+    // Preserve a readable URL label/anchor while removing ChatGPT's private-use wrapper.
+    .replace(/\uE200url\uE202([^\uE202\uE201]+)\uE202/gu, "$1: ")
+    .replace(/(?:|\\ue200)url(?:|\\ue202)([^]+)(?:|\\ue202)/giu, "$1: ")
     // Current ChatGPT citation serialization: citeturn0search0.
     .replace(/\uE200(?:cite|filecite|navlist)\uE202[\s\S]*?\uE201/gu, "")
     // Defensive fallback for escaped/private-use variants observed in exports.
     .replace(/(?:|\\ue200)(?:cite|filecite|navlist)(?:|\\ue202)[\s\S]*?(?:|\\ue201)/giu, "")
     .replace(/\[(?:cite|filecite):[^\]]+\]/giu, "")
+    .replace(/[\uE200\uE201\uE202]/gu, "")
     .replace(/<p>\s*<\/p>/giu, "")
     .trim();
 }

@@ -6,7 +6,7 @@ export const documentTheme = {
   fontSize: { body: "15px", small: "12px", code: "13px", title: "24px" },
   lineHeight: { body: 1.7, code: 1.55 },
   spacing: { paragraph: ".9em", message: "26px" },
-  page: { width: 794, height: 1123, marginTop: 60, marginX: 68, marginBottom: 68, maxWidth: "760px" },
+  page: { width: 794, height: 1123, marginTop: 68, marginX: 68, marginBottom: 68, maxWidth: "760px" },
 } as const;
 
 export const documentCssVariables = {
