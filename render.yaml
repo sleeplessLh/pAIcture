@@ -3,7 +3,7 @@ services:
     name: paicture-extractor
     runtime: node
     plan: free
-    buildCommand: pnpm exec playwright install chromium
+    buildCommand: pnpm install --frozen-lockfile && pnpm exec playwright install chromium
     startCommand: node server/extractor.mjs
     healthCheckPath: /health
     envVars:
