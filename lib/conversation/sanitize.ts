@@ -1,5 +1,14 @@
-const allowedTags = new Set(["p","br","strong","b","em","i","u","s","ul","ol","li","blockquote","a","pre","code","table","thead","tbody","tr","th","td","h1","h2","h3","h4","hr","img","figure","figcaption","span"]);
-const allowedAttributes = new Set(["href", "src", "alt", "title", "class", "colspan", "rowspan"]);
+const allowedTags = new Set([
+  "p","br","strong","b","em","i","u","s","ul","ol","li","blockquote","a","pre","code","table","thead","tbody","tr","th","td","h1","h2","h3","h4","hr","img","figure","figcaption","span",
+  // KaTeX's MathML-only output. Keeping this explicit allow-list lets the
+  // canonical preview/export sanitizer preserve equations without admitting
+  // arbitrary SVG or executable markup.
+  "math","semantics","annotation","mrow","mi","mn","mo","mtext","mspace","mfrac","msqrt","mroot","msub","msup","msubsup","munder","mover","munderover","mmultiscripts","mprescripts","none","mtable","mtr","mtd","menclose","mstyle","mpadded","mphantom",
+]);
+const allowedAttributes = new Set([
+  "href", "src", "alt", "title", "class", "colspan", "rowspan",
+  "xmlns", "display", "encoding", "mathvariant", "mathsize", "displaystyle", "scriptlevel", "stretchy", "symmetric", "fence", "separator", "form", "lspace", "rspace", "width", "height", "depth", "accent", "accentunder", "columnalign", "rowalign", "notation",
+]);
 export function sanitizeHtml(input: string) {
   return input.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<!--([\s\S]*?)-->/g, "")
     .replace(/<\/?([a-z0-9-]+)([^>]*)>/gi, (tag, name, attrs) => {
