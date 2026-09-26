@@ -38,6 +38,108 @@ async function readJson(request, maxBytes = 32_768) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+function sharedAssetPointers(html) {
+  return [...new Set(html.match(/sediment:\/\/file_[a-z0-9_-]+(?:\?shared_conversation_id=[a-z0-9-]+)?/gi) || [])];
+}
+
+async function resolveSharedImages(target, html) {
+  const pointers = sharedAssetPointers(html);
+  if (!pointers.length) return { assets: {}, warnings: [] };
+  console.info("[IMAGE] Shared image assets detected", { count: pointers.length });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+    const navigation = await page.goto(target.toString(), { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.evaluate(async () => {
+      for (let y = 0; y < document.documentElement.scrollHeight; y += 700) {
+        window.scrollTo(0, y);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+      window.scrollTo(0, 0);
+    });
+    await page.waitForFunction(
+      () => [...document.images].some((image) => image.naturalWidth >= 256 && image.naturalHeight >= 256),
+      undefined,
+      { timeout: 15_000 },
+    ).catch(() => undefined);
+    console.info("[IMAGE] Rendered share inspected", {
+      status: navigation?.status(),
+      title: await page.title(),
+      imageCount: await page.locator("img").count(),
+      url: page.url(),
+    });
+    const renderedImages = await page.evaluate(() => {
+      const unique = new Map();
+      for (const image of [...document.images]) {
+        const src = image.currentSrc || image.src;
+        if (!((image.naturalWidth >= 256 && image.naturalHeight >= 256) || /oaiusercontent\.com/i.test(src)) || unique.has(src)) continue;
+        unique.set(src, {
+        src: image.currentSrc || image.src,
+        alt: image.alt || "ChatGPT generated image",
+        width: image.naturalWidth || undefined,
+        height: image.naturalHeight || undefined,
+        });
+      }
+      return [...unique.values()];
+    });
+    const resolved = {};
+    const fetchedImageSources = new Set();
+    for (const renderedImage of renderedImages) {
+      try {
+        const imageResponse = await page.request.get(renderedImage.src, { timeout: 25_000 });
+        const mimeType = (imageResponse.headers()["content-type"] || "").split(";")[0].toLowerCase();
+        if (!imageResponse.ok() || !mimeType.startsWith("image/")) continue;
+        const image = await imageResponse.body();
+        const asset = {
+          src: `data:${mimeType};base64,${image.toString("base64")}`,
+          alt: renderedImage.alt,
+          width: renderedImage.width,
+          height: renderedImage.height,
+        };
+        resolved[`image-title:${renderedImage.alt.replace(/^Generated image:\s*/i, "").trim().toLowerCase()}`] = asset;
+        fetchedImageSources.add(renderedImage.src);
+      } catch {}
+    }
+    const sharedId = target.pathname.split("/").filter(Boolean).at(-1);
+    for (let index = 0; index < pointers.length; index++) {
+      const pointer = pointers[index];
+      const fileId = pointer.match(/sediment:\/\/([^?]+)/i)?.[1];
+      if (!fileId) continue;
+      const query = new URLSearchParams({ shared_conversation_id: sharedId }).toString();
+      const candidates = [
+        new URL(`/backend-api/files/${encodeURIComponent(fileId)}/download?${query}`, target).toString(),
+        new URL(`/backend-api/files/${encodeURIComponent(fileId)}/content?${query}`, target).toString(),
+      ].filter(Boolean);
+      for (const candidate of candidates) {
+        try {
+          const imageResponse = await page.request.get(candidate, { timeout: 25_000 });
+          const mimeType = (imageResponse.headers()["content-type"] || "").split(";")[0].toLowerCase();
+          if (!imageResponse.ok() || !mimeType.startsWith("image/")) continue;
+          const image = await imageResponse.body();
+          resolved[pointer] = {
+            src: `data:${mimeType};base64,${image.toString("base64")}`,
+            alt: renderedImages[index]?.alt || "ChatGPT generated image",
+            width: renderedImages[index]?.width,
+            height: renderedImages[index]?.height,
+          };
+          break;
+        } catch {}
+      }
+    }
+    const pointerAssets = pointers.filter((pointer) => resolved[pointer]).length;
+    const recoveredAssets = Math.min(pointers.length, pointerAssets + fetchedImageSources.size);
+    const failures = pointers.slice(recoveredAssets);
+    for (const [pointer, asset] of Object.entries(resolved)) console.info("[IMAGE] Asset loaded", { pointer: pointer.replace(/\?.*$/, ""), width: asset.width, height: asset.height });
+    if (failures.length) console.warn("[IMAGE] Asset retrieval failed", { count: failures.length });
+    return {
+      assets: resolved,
+      warnings: failures.length ? [`${failures.length} shared image${failures.length === 1 ? "" : "s"} could not be retrieved from the public conversation.`] : [],
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
 createServer(async (request, response) => {
   const requestUrl = new URL(request.url || "/", "http://localhost");
   if (request.method === "GET" && requestUrl.pathname === "/health") return json(response, 200, { ok: true });
@@ -47,8 +149,8 @@ createServer(async (request, response) => {
   if (origin && allowedOrigins.size && !allowedOrigins.has(origin)) return json(response, 403, { error: "Origin not allowed" });
   try {
     if (requestUrl.pathname === "/render/pdf") {
-      const body = await readJson(request, 8_000_000);
-      if (typeof body.html !== "string" || body.html.length > 7_500_000) throw new Error("INVALID_DOCUMENT");
+      const body = await readJson(request, 40_000_000);
+      if (typeof body.html !== "string" || body.html.length > 38_000_000) throw new Error("INVALID_DOCUMENT");
       const safeDocument = body.html
         .replace(/<script[\s\S]*?<\/script>/gi, "")
         .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
@@ -59,10 +161,13 @@ createServer(async (request, response) => {
         await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${cjkFontCss}\n${exportDocumentCss}</style></head><body>${safeDocument}</body></html>`, { waitUntil: "load" });
         await page.evaluate(async () => {
           await document.fonts.ready;
-          await Promise.all([...document.images].map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => {
-            image.addEventListener("load", resolve, { once: true });
-            image.addEventListener("error", resolve, { once: true });
-          })));
+          await Promise.all([...document.images].map(async (image) => {
+            if (!image.complete) await new Promise((resolve) => {
+              image.addEventListener("load", resolve, { once: true });
+              image.addEventListener("error", resolve, { once: true });
+            });
+            if (image.naturalWidth && image.decode) await image.decode().catch(() => undefined);
+          }));
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           document.documentElement.dataset.exportReady = "true";
         });
@@ -102,8 +207,9 @@ createServer(async (request, response) => {
     const html = await upstream.text();
     if (html.length > 5_000_000) throw new Error("UPSTREAM_TOO_LARGE");
     if (!html.includes("__reactRouterContext.streamController.enqueue")) throw new Error("CONVERSATION_DATA_NOT_FOUND");
+    const resolvedImages = await resolveSharedImages(target, html);
     console.info("[RETRIEVE] Complete", { bytes: html.length });
-    return json(response, 200, { html });
+    return json(response, 200, { html, assets: resolvedImages.assets, assetWarnings: resolvedImages.warnings });
   } catch (error) {
     console.error("[RETRIEVE] Failed", error);
     return json(response, 502, { error: "Unable to retrieve shared conversation" });

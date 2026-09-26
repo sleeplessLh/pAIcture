@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { adapters, parseChatGptShareHtml } from "../../../../lib/conversation/adapters";
+import type { ResolvedImageAssets } from "../../../../lib/conversation/types";
 
 const friendlyError = "Unable to import this shared conversation. Please make sure this is a valid ChatGPT shared conversation link and that it is still publicly accessible.";
 
@@ -25,10 +26,13 @@ export async function POST(request: Request) {
         body: JSON.stringify({ url: url.toString() }),
       });
       if (!response.ok) throw new Error(`EXTRACTOR_${response.status}`);
-      const payload = await response.json() as { html?: unknown };
+      const payload = await response.json() as { html?: unknown; assets?: unknown; assetWarnings?: unknown };
       if (typeof payload.html !== "string") throw new Error("EXTRACTOR_INVALID_PAYLOAD");
       console.info("[IMPORT] Response received", { bytes: payload.html.length });
-      conversation = parseChatGptShareHtml(payload.html, url.toString());
+      const assets = payload.assets && typeof payload.assets === "object" ? payload.assets as ResolvedImageAssets : {};
+      console.info("[IMAGE] Resolved shared assets", { count: Object.keys(assets).length });
+      conversation = parseChatGptShareHtml(payload.html, url.toString(), assets);
+      if (Array.isArray(payload.assetWarnings)) conversation.warnings = [...(conversation.warnings || []), ...payload.assetWarnings.filter((item): item is string => typeof item === "string")];
     } else {
       console.info("[IMPORT] Retrieval strategy: direct structured page fetch");
       conversation = await adapter.extract(url);

@@ -7,7 +7,8 @@ const allowedTags = new Set([
 ]);
 const allowedAttributes = new Set([
   "href", "src", "alt", "title", "class", "colspan", "rowspan",
-  "xmlns", "display", "encoding", "mathvariant", "mathsize", "displaystyle", "scriptlevel", "stretchy", "symmetric", "fence", "separator", "form", "lspace", "rspace", "width", "height", "depth", "accent", "accentunder", "columnalign", "rowalign", "notation",
+  "width", "height", "loading", "decoding",
+  "xmlns", "display", "encoding", "mathvariant", "mathsize", "displaystyle", "scriptlevel", "stretchy", "symmetric", "fence", "separator", "form", "lspace", "rspace", "depth", "accent", "accentunder", "columnalign", "rowalign", "notation",
 ]);
 export function sanitizeHtml(input: string) {
   return input.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<!--([\s\S]*?)-->/g, "")

@@ -21,10 +21,13 @@ function detectPlatform(value: string): Platform | null {
 
 async function waitForDocumentReady(root: HTMLElement) {
   await document.fonts.ready;
-  await Promise.all([...root.querySelectorAll("img")].map((image) => image.complete ? Promise.resolve() : new Promise<void>((resolve) => {
-    image.addEventListener("load", () => resolve(), { once: true });
-    image.addEventListener("error", () => resolve(), { once: true });
-  })));
+  await Promise.all([...root.querySelectorAll("img")].map(async (image) => {
+    if (!image.complete) await new Promise<void>((resolve) => {
+      image.addEventListener("load", () => resolve(), { once: true });
+      image.addEventListener("error", () => resolve(), { once: true });
+    });
+    if (image.naturalWidth && image.decode) await image.decode().catch(() => undefined);
+  }));
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
