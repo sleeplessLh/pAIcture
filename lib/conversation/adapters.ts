@@ -1,7 +1,8 @@
 import hljs from "highlight.js";
+import katex from "katex";
 import { marked, type Tokens } from "marked";
-import { sanitizeHtml } from "./sanitize";
-import type { ConversationAdapter, ExtractedConversation, ExtractedMessage, Platform } from "./types";
+import { sanitizeHtml } from "./sanitize.ts";
+import type { ConversationAdapter, ExtractedConversation, ExtractedMessage, Platform } from "./types.ts";
 
 const headers = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
@@ -12,14 +13,38 @@ function titleFromHtml(html: string, platform: Platform) {
   const match = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i) ?? html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return match?.[1]?.replace(/<[^>]+>/g, "").replace(/\s*[|—-]\s*(ChatGPT|Gemini|Claude).*$/i, "").trim() || `${platform} conversation`;
 }
-function renderMarkdown(source: string) {
+function extractMath(source: string) {
+  const rendered: string[] = [];
+  const token = (tex: string, displayMode: boolean) => {
+    const index = rendered.length;
+    const key = `PAICTUREMATH${displayMode ? "DISPLAY" : "INLINE"}${index}TOKEN`;
+    const math = katex.renderToString(tex.trim(), {
+      displayMode,
+      output: "mathml",
+      throwOnError: false,
+      strict: "ignore",
+      trust: false,
+    });
+    rendered.push(`<span class="math-expression ${displayMode ? "math-display" : "math-inline"}">${math}</span>`);
+    return key;
+  };
+  const markdown = source
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, tex: string) => token(tex, true))
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_, tex: string) => token(tex, true))
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, tex: string) => token(tex, false));
+  return { markdown, rendered };
+}
+
+export function renderMarkdown(source: string) {
+  const { markdown, rendered } = extractMath(source);
   const renderer = new marked.Renderer();
   renderer.code = ({ text, lang }: Tokens.Code) => {
     const valid = lang && hljs.getLanguage(lang) ? lang : undefined;
     const highlighted = valid ? hljs.highlight(text, { language: valid }).value : hljs.highlightAuto(text).value;
     return `<pre><code class="hljs${valid ? ` language-${valid}` : ""}">${highlighted}</code></pre>`;
   };
-  return sanitizeHtml(marked.parse(source, { async: false, gfm: true, breaks: true, renderer }) as string);
+  return sanitizeHtml(marked.parse(markdown, { async: false, gfm: true, breaks: true, renderer }) as string)
+    .replace(/PAICTUREMATH(?:DISPLAY|INLINE)(\d+)TOKEN/g, (_, index: string) => rendered[Number(index)] || "");
 }
 function decodeDevalue(flat: unknown[]) {
   const cache = new Map<number, unknown>();

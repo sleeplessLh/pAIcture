@@ -219,7 +219,9 @@ export default function Home() {
       }
       setExportPhase("downloading");
       if (pages.length === 1) {
-        downloadBlob(new Blob([pngFiles[Object.keys(pngFiles)[0]]], { type: "image/png" }), `${slug}.png`);
+        const file = pngFiles[Object.keys(pngFiles)[0]];
+        const bytes = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer;
+        downloadBlob(new Blob([bytes], { type: "image/png" }), `${slug}.png`);
       } else {
         const { zipSync } = await import("fflate");
         const archive = zipSync(pngFiles, { level: 6 });
