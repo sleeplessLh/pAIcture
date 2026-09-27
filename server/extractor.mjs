@@ -42,10 +42,45 @@ function sharedAssetPointers(html) {
   return [...new Set(html.match(/sediment:\/\/file_[a-z0-9_-]+(?:\?shared_conversation_id=[a-z0-9-]+)?/gi) || [])];
 }
 
-async function resolveSharedImages(target, html) {
+async function resolveSharedImages(target, html, cookieHeader = "") {
   const pointers = sharedAssetPointers(html);
   if (!pointers.length) return { assets: {}, warnings: [] };
   console.info("[IMAGE] Shared image assets detected", { count: pointers.length });
+  const directAssets = {};
+  for (const pointer of pointers) {
+    const fileId = pointer.match(/sediment:\/\/([^?]+)/i)?.[1];
+    if (!fileId) continue;
+    try {
+      const sharedId = target.pathname.split("/").filter(Boolean).at(-1);
+      const endpoint = new URL(`/backend-anon/files/download/${encodeURIComponent(fileId)}`, target);
+      endpoint.search = new URLSearchParams({
+        shared_conversation_id: sharedId,
+        inline: "false",
+        download_intent: "false",
+      }).toString();
+      const metadataResponse = await fetch(endpoint, {
+        headers: { ...headers, Cookie: cookieHeader, Referer: target.toString() },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!metadataResponse.ok) continue;
+      const metadata = await metadataResponse.json();
+      if (typeof metadata.download_url !== "string") continue;
+      const downloadUrl = new URL(metadata.download_url);
+      if (downloadUrl.protocol !== "https:" || !downloadUrl.hostname.endsWith(".oaiusercontent.com")) continue;
+      const imageResponse = await fetch(downloadUrl, { signal: AbortSignal.timeout(25_000) });
+      const mimeType = (imageResponse.headers.get("content-type") || "").split(";")[0].toLowerCase();
+      if (!imageResponse.ok || !mimeType.startsWith("image/")) continue;
+      const image = Buffer.from(await imageResponse.arrayBuffer());
+      directAssets[pointer] = {
+        src: `data:${mimeType};base64,${image.toString("base64")}`,
+        alt: "ChatGPT generated image",
+      };
+    } catch {}
+  }
+  console.info("[IMAGE] Anonymous assets resolved", { resolved: Object.keys(directAssets).length });
+  if (Object.keys(directAssets).length === pointers.length) {
+    return { assets: directAssets, warnings: [] };
+  }
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
@@ -92,7 +127,7 @@ async function resolveSharedImages(target, html) {
       }
       return [...unique.values()];
     });
-    const resolved = {};
+    const resolved = { ...directAssets };
     const fetchedImageSources = new Set();
     for (const renderedImage of renderedImages) {
       try {
@@ -223,7 +258,10 @@ createServer(async (request, response) => {
     const html = await upstream.text();
     if (html.length > 5_000_000) throw new Error("UPSTREAM_TOO_LARGE");
     if (!html.includes("__reactRouterContext.streamController.enqueue")) throw new Error("CONVERSATION_DATA_NOT_FOUND");
-    const resolvedImages = await resolveSharedImages(target, html);
+    const cookieHeader = (upstream.headers.getSetCookie?.() || [])
+      .map((cookie) => cookie.split(";", 1)[0])
+      .join("; ");
+    const resolvedImages = await resolveSharedImages(target, html, cookieHeader);
     console.info("[RETRIEVE] Complete", { bytes: html.length });
     return json(response, 200, { html, assets: resolvedImages.assets, assetWarnings: resolvedImages.warnings });
   } catch (error) {
