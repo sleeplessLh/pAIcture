@@ -49,6 +49,15 @@ async function resolveSharedImages(target, html) {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+    const capturedImageResponses = new Map();
+    const captureTasks = [];
+    page.on("response", (response) => {
+      const contentType = (response.headers()["content-type"] || "").split(";")[0].toLowerCase();
+      if (!contentType.startsWith("image/") || !/oaiusercontent\.com/i.test(response.url())) return;
+      captureTasks.push(response.body()
+        .then((body) => capturedImageResponses.set(response.url(), { body, contentType }))
+        .catch(() => undefined));
+    });
     const navigation = await page.goto(target.toString(), { waitUntil: "domcontentloaded", timeout: 45_000 });
     await page.evaluate(async () => {
       for (let y = 0; y < document.documentElement.scrollHeight; y += 700) {
@@ -62,6 +71,7 @@ async function resolveSharedImages(target, html) {
       undefined,
       { timeout: 15_000 },
     ).catch(() => undefined);
+    await Promise.allSettled(captureTasks);
     console.info("[IMAGE] Rendered share inspected", {
       status: navigation?.status(),
       title: await page.title(),
@@ -86,10 +96,11 @@ async function resolveSharedImages(target, html) {
     const fetchedImageSources = new Set();
     for (const renderedImage of renderedImages) {
       try {
-        const imageResponse = await page.request.get(renderedImage.src, { timeout: 25_000 });
-        const mimeType = (imageResponse.headers()["content-type"] || "").split(";")[0].toLowerCase();
-        if (!imageResponse.ok() || !mimeType.startsWith("image/")) continue;
-        const image = await imageResponse.body();
+        const captured = capturedImageResponses.get(renderedImage.src);
+        const imageResponse = captured ? null : await page.request.get(renderedImage.src, { timeout: 25_000 });
+        const mimeType = captured?.contentType || (imageResponse?.headers()["content-type"] || "").split(";")[0].toLowerCase();
+        if (!captured && (!imageResponse?.ok() || !mimeType.startsWith("image/"))) continue;
+        const image = captured?.body || await imageResponse.body();
         const asset = {
           src: `data:${mimeType};base64,${image.toString("base64")}`,
           alt: renderedImage.alt,
@@ -100,6 +111,11 @@ async function resolveSharedImages(target, html) {
         fetchedImageSources.add(renderedImage.src);
       } catch {}
     }
+    console.info("[IMAGE] Rendered assets resolved", {
+      candidates: renderedImages.length,
+      captured: capturedImageResponses.size,
+      resolved: fetchedImageSources.size,
+    });
     const sharedId = target.pathname.split("/").filter(Boolean).at(-1);
     for (let index = 0; index < pointers.length; index++) {
       const pointer = pointers[index];
