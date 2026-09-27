@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { html?: unknown };
+    const body = await request.json() as { html?: unknown; config?: { paper?: unknown; orientation?: unknown } };
     if (typeof body.html !== "string" || body.html.length > 7_500_000) {
       return NextResponse.json({ error: "Invalid export document." }, { status: 400 });
     }
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
         ...(process.env.CHATGPT_EXTRACTOR_TOKEN ? { Authorization: `Bearer ${process.env.CHATGPT_EXTRACTOR_TOKEN}` } : {}),
       },
-      body: JSON.stringify({ html: body.html }),
+      body: JSON.stringify({ html: body.html, config: body.config }),
     });
     if (!upstream.ok) throw new Error(`PDF_RENDERER_${upstream.status}`);
     return new Response(await upstream.arrayBuffer(), {

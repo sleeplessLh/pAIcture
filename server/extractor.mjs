@@ -202,6 +202,11 @@ createServer(async (request, response) => {
     if (requestUrl.pathname === "/render/pdf") {
       const body = await readJson(request, 40_000_000);
       if (typeof body.html !== "string" || body.html.length > 38_000_000) throw new Error("INVALID_DOCUMENT");
+      const paper = ["a4", "a3", "letter"].includes(body.config?.paper) ? body.config.paper : "a4";
+      const orientation = body.config?.orientation === "landscape" ? "landscape" : "portrait";
+      const paperFormat = paper === "a3" ? "A3" : paper === "letter" ? "Letter" : "A4";
+      const margin = paper === "a3" ? "21.7mm" : "18mm";
+      const pageOverrideCss = `@page { size: ${paperFormat} ${orientation}; margin: ${margin}; }`;
       const safeDocument = body.html
         .replace(/<script[\s\S]*?<\/script>/gi, "")
         .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
@@ -209,7 +214,7 @@ createServer(async (request, response) => {
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage({ viewport: { width: 794, height: 1123 }, deviceScaleFactor: 1 });
-        await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${cjkFontCss}\n${exportDocumentCss}</style></head><body>${safeDocument}</body></html>`, { waitUntil: "load" });
+        await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${cjkFontCss}\n${exportDocumentCss}\n${pageOverrideCss}</style></head><body>${safeDocument}</body></html>`, { waitUntil: "load" });
         await page.evaluate(async () => {
           await document.fonts.ready;
           await Promise.all([...document.images].map(async (image) => {
@@ -224,13 +229,14 @@ createServer(async (request, response) => {
         });
         await page.emulateMedia({ media: "print" });
         const pdf = await page.pdf({
-          format: "A4",
+          format: paperFormat,
+          landscape: orientation === "landscape",
           printBackground: true,
           preferCSSPageSize: true,
           displayHeaderFooter: true,
           headerTemplate: "<span></span>",
-          footerTemplate: `<div style="box-sizing:border-box;width:100%;padding:0 18mm;color:#8a8a85;font:9px Arial,sans-serif;display:flex;justify-content:space-between"><span>pAIcture</span><span class="pageNumber"></span></div>`,
-          margin: { top: "18mm", right: "18mm", bottom: "18mm", left: "18mm" },
+          footerTemplate: `<div style="box-sizing:border-box;width:100%;padding:0 ${margin};color:#8a8a85;font:9px Arial,sans-serif;display:flex;justify-content:space-between"><span>pAIcture</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`,
+          margin: { top: margin, right: margin, bottom: margin, left: margin },
           tagged: true,
           outline: true,
         });

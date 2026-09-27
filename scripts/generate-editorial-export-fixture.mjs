@@ -22,22 +22,28 @@ const exchanges = [
 ].join("");
 
 const appearance = process.env.DOCUMENT_APPEARANCE === "dark" ? "dark" : "light";
+const paper = ["A4", "A3", "Letter"].includes(process.env.PAPER_SIZE) ? process.env.PAPER_SIZE : "A4";
+const landscape = process.env.ORIENTATION === "landscape";
+const suffix = `${paper.toLowerCase()}-${landscape ? "landscape" : "portrait"}-${appearance}`;
+const margin = paper === "A3" ? "21.7mm" : "18mm";
+const pageDimensions = { A4: [794, 1123], A3: [1123, 1587], Letter: [816, 1056] }[paper];
+const [pageWidth, pageHeight] = landscape ? [pageDimensions[1], pageDimensions[0]] : pageDimensions;
 const documentHtml = `<div class="conversation-document" data-appearance="${appearance}"><header class="conversation-document-head"><div class="conversation-document-brand"><span>pAIcture</span><i></i></div><p class="conversation-document-kicker">AI conversation document</p><h3>Understanding MVCC, Locks, and Read Views</h3><div class="conversation-document-meta"><span><small>Exported</small>September 27, 2026</span><span><small>Source</small>ChatGPT</span><span><small>Selected</small>3 exchanges</span></div></header><div class="conversation-messages">${exchanges}</div></div>`;
-const html = `<!doctype html><html><head><meta charset="utf-8"><style>${exportDocumentCss}</style></head><body>${documentHtml}</body></html>`;
+const html = `<!doctype html><html><head><meta charset="utf-8"><style>${exportDocumentCss}\n@page { size: ${paper} ${landscape ? "landscape" : "portrait"}; margin: ${margin}; }</style></head><body>${documentHtml}</body></html>`;
 
 const browser = await chromium.launch({ headless: true });
 try {
-  const page = await browser.newPage({ viewport: { width: 794, height: 1123 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ viewport: { width: pageWidth, height: pageHeight }, deviceScaleFactor: 2 });
   await page.setContent(html, { waitUntil: "load" });
   await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map((image) => image.decode?.().catch(() => undefined))); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
   await page.emulateMedia({ media: "print" });
-  const pdf = await page.pdf({ format: "A4", printBackground: true, preferCSSPageSize: true, displayHeaderFooter: true, headerTemplate: "<span></span>", footerTemplate: '<div style="box-sizing:border-box;width:100%;padding:0 18mm;color:#8a8a85;font:9px Arial,sans-serif;display:flex;justify-content:space-between"><span>pAIcture</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>', margin: { top: "18mm", right: "18mm", bottom: "18mm", left: "18mm" }, tagged: true, outline: true });
-  await writeFile(path.join(pdfDir, "paicture-editorial-export-validation.pdf"), pdf);
+  const pdf = await page.pdf({ format: paper, landscape, printBackground: true, preferCSSPageSize: true, displayHeaderFooter: true, headerTemplate: "<span></span>", footerTemplate: `<div style="box-sizing:border-box;width:100%;padding:0 ${margin};color:#8a8a85;font:9px Arial,sans-serif;display:flex;justify-content:space-between"><span>pAIcture</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`, margin: { top: margin, right: margin, bottom: margin, left: margin }, tagged: true, outline: true });
+  await writeFile(path.join(pdfDir, `paicture-export-studio-${suffix}.pdf`), pdf);
   await page.emulateMedia({ media: "screen" });
-  await page.setViewportSize({ width: 794, height: Math.ceil(await page.locator(".conversation-document").evaluate((element) => element.scrollHeight)) });
-  await page.locator(".conversation-document").screenshot({ path: path.join(pngDir, "paicture-editorial-export-validation.png"), type: "png" });
-  console.log(path.join(pdfDir, "paicture-editorial-export-validation.pdf"));
-  console.log(path.join(pngDir, "paicture-editorial-export-validation.png"));
+  await page.setViewportSize({ width: pageWidth, height: Math.ceil(await page.locator(".conversation-document").evaluate((element) => element.scrollHeight)) });
+  await page.locator(".conversation-document").screenshot({ path: path.join(pngDir, `paicture-export-studio-${suffix}.png`), type: "png" });
+  console.log(path.join(pdfDir, `paicture-export-studio-${suffix}.pdf`));
+  console.log(path.join(pngDir, `paicture-export-studio-${suffix}.png`));
 } finally {
   await browser.close();
 }
