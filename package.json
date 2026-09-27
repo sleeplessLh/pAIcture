@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern tmp --ignore-pattern output --ignore-pattern plugin-site/deploy",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:render": "node scripts/generate-export-stress-fixture.mjs",
+    "test:editorial-export": "node scripts/generate-editorial-export-fixture.mjs",
     "extractor:start": "node server/extractor.mjs"
   },
   "dependencies": {
