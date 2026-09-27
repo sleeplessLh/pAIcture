@@ -78,3 +78,55 @@ test("turns image-generation tool output into assistant content and removes skip
   assert.deepEqual(parsed.messages[1].content?.map((part) => part.type), ["image"]);
   assert.doesNotMatch(parsed.messages[1].html, /skipped_mainline/);
 });
+
+test("removes internal image-generation arguments without removing the generated image", () => {
+  const argumentsPayload = JSON.stringify({
+    prompt: null,
+    size: "1024x1536",
+    n: 1,
+    transparent_background: false,
+    is_style_transfer: false,
+    referenced_image_ids: null,
+  });
+  const conversation = {
+    title: "Image arguments test",
+    current_node: "image",
+    mapping: {
+      user: {
+        parent: null,
+        message: { author: { role: "user" }, recipient: "all", content: { parts: ["Generate a poster"] } },
+      },
+      arguments: {
+        parent: "user",
+        message: {
+          author: { role: "assistant" },
+          recipient: "image_gen_tool",
+          content: { content_type: "code", language: "python3", text: argumentsPayload },
+        },
+      },
+      image: {
+        parent: "arguments",
+        message: {
+          author: { role: "tool" },
+          recipient: "all",
+          content: { content_type: "multimodal_text", parts: [{ content_type: "image_asset_pointer", asset_pointer: pointer }] },
+          metadata: { image_gen_title: "Poster" },
+        },
+      },
+    },
+  };
+  const serialized = JSON.stringify(JSON.stringify(conversation));
+  const parsed = parseChatGptShareHtml(`<script>window.__reactRouterContext.streamController.enqueue(${serialized})</script>`, undefined, {
+    "image-title:poster": { src: "data:image/png;base64,aGVsbG8=" },
+  });
+
+  assert.deepEqual(parsed.messages.map((message) => message.role), ["user", "assistant"]);
+  assert.deepEqual(parsed.messages[1].content?.map((part) => part.type), ["image"]);
+  assert.doesNotMatch(parsed.messages[1].html, /transparent_background|referenced_image_ids|1024x1536/);
+});
+
+test("preserves user-authored JSON even when it resembles image settings", () => {
+  const content = normalizeContentParts({ parts: ['{"prompt":"example","size":"1024x1536","n":1}'] });
+  assert.equal(content.length, 1);
+  assert.match(content[0].type === "text" ? content[0].html : "", /prompt/);
+});

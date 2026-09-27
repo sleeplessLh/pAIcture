@@ -151,6 +151,23 @@ function isSkippedMainlineContent(content: unknown) {
     return false;
   }
 }
+function isInternalAssistantToolPayload(message: Record<string, unknown> | undefined, authorRole: unknown) {
+  if (authorRole !== "assistant" || !message || message.recipient === "all") return false;
+  const content = message.content as Record<string, unknown> | undefined;
+  if (content?.content_type !== "code" || typeof content.text !== "string") return false;
+  try {
+    const value = JSON.parse(content.text) as Record<string, unknown>;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const keys = new Set(Object.keys(value));
+    return keys.has("prompt") && keys.has("size") && keys.has("n") && (
+      keys.has("transparent_background") ||
+      keys.has("referenced_image_ids") ||
+      keys.has("is_style_transfer")
+    );
+  } catch {
+    return false;
+  }
+}
 function contentPartsHtml(parts: ContentPart[]) {
   return parts.map((part) => {
     if (part.type === "text") return part.html;
@@ -173,7 +190,7 @@ function messagesFromConversation(conversation: Record<string, unknown>, assets:
     const message = node.message as Record<string, unknown> | undefined;
     const author = message?.author as Record<string, unknown> | undefined;
     const authorRole = author?.role;
-    if (isSkippedMainlineContent(message?.content)) continue;
+    if (isSkippedMainlineContent(message?.content) || isInternalAssistantToolPayload(message, authorRole)) continue;
     const metadata = message?.metadata as Record<string, unknown> | undefined;
     const imageTitle = typeof metadata?.image_gen_title === "string" ? metadata.image_gen_title : "";
     const titledAsset = imageTitle ? assets[imageTitleKey(imageTitle)] : undefined;
