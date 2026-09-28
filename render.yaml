@@ -7,6 +7,8 @@ services:
     startCommand: node server/extractor.mjs
     healthCheckPath: /health
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "0"
       - key: CHATGPT_EXTRACTOR_TOKEN

@@ -243,7 +243,20 @@ function messagesFromRenderedChatGptHtml(html: string): ExtractedMessage[] {
   });
 }
 async function fetchChatGptShare(url: URL): Promise<string> {
-  const response = await fetch(url, { redirect: "follow", headers });
+  let target = new URL(url);
+  let response: Response | null = null;
+  for (let redirects = 0; redirects <= 4; redirects++) {
+    if (target.protocol !== "https:" || target.hostname !== "chatgpt.com" || !/^\/share\/[a-z0-9-]+\/?$/i.test(target.pathname)) {
+      throw new Error("SOURCE_UNAVAILABLE");
+    }
+    response = await fetch(target, { redirect: "manual", headers });
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    const location = response.headers.get("location");
+    if (!location) throw new Error("SOURCE_UNAVAILABLE");
+    target = new URL(location, target);
+    response = null;
+  }
+  if (!response) throw new Error("SOURCE_UNAVAILABLE");
   if (response.ok) return response.text();
   if (response.status === 404) throw new Error("This shared conversation is unavailable or expired.");
   throw new Error("SOURCE_UNAVAILABLE");

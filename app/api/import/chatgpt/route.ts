@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     const extractorUrl = process.env.CHATGPT_EXTRACTOR_URL?.replace(/\/$/, "");
     let conversation;
     if (extractorUrl) {
+      if (!process.env.CHATGPT_EXTRACTOR_TOKEN) throw new Error("EXTRACTOR_NOT_CONFIGURED");
       console.info("[IMPORT] Retrieval strategy: dedicated Node extractor");
       const response = await fetch(`${extractorUrl}/retrieve`, {
         method: "POST",
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
           ...(process.env.CHATGPT_EXTRACTOR_TOKEN ? { Authorization: `Bearer ${process.env.CHATGPT_EXTRACTOR_TOKEN}` } : {}),
         },
         body: JSON.stringify({ url: url.toString() }),
+        signal: AbortSignal.timeout(90_000),
       });
       if (!response.ok) throw new Error(`EXTRACTOR_${response.status}`);
       const payload = await response.json() as { html?: unknown; assets?: unknown; assetWarnings?: unknown };

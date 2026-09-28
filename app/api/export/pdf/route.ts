@@ -8,6 +8,7 @@ export async function POST(request: Request) {
     }
     const extractorUrl = process.env.CHATGPT_EXTRACTOR_URL?.replace(/\/$/, "");
     if (!extractorUrl) return NextResponse.json({ error: "PDF rendering is temporarily unavailable." }, { status: 503 });
+    if (!process.env.CHATGPT_EXTRACTOR_TOKEN) return NextResponse.json({ error: "PDF rendering is temporarily unavailable." }, { status: 503 });
     const upstream = await fetch(`${extractorUrl}/render/pdf`, {
       method: "POST",
       headers: {
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
         ...(process.env.CHATGPT_EXTRACTOR_TOKEN ? { Authorization: `Bearer ${process.env.CHATGPT_EXTRACTOR_TOKEN}` } : {}),
       },
       body: JSON.stringify({ html: body.html, config: body.config }),
+      signal: AbortSignal.timeout(120_000),
     });
     if (!upstream.ok) throw new Error(`PDF_RENDERER_${upstream.status}`);
     return new Response(await upstream.arrayBuffer(), {

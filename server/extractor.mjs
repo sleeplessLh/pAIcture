@@ -7,6 +7,7 @@ import { exportDocumentCss } from "../lib/export-document-style.mjs";
 
 const port = Number(process.env.PORT || 8789);
 const token = process.env.CHATGPT_EXTRACTOR_TOKEN || "";
+const isProduction = process.env.NODE_ENV === "production";
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || "").split(",").map((value) => value.trim()).filter(Boolean));
 const sharePath = /^\/share\/[a-z0-9-]+\/?$/i;
 const headers = {
@@ -14,6 +15,46 @@ const headers = {
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
 };
+
+if (isProduction && !token) {
+  throw new Error("CHATGPT_EXTRACTOR_TOKEN is required in production.");
+}
+
+function isAllowedShareUrl(value) {
+  try {
+    const url = value instanceof URL ? value : new URL(value);
+    return url.protocol === "https:" && url.hostname === "chatgpt.com" && sharePath.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedImageUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && (
+      url.hostname === "chatgpt.com" ||
+      url.hostname.endsWith(".oaiusercontent.com") ||
+      url.hostname.endsWith(".oaistatic.com") ||
+      url.hostname.endsWith(".openai.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function fetchShareFollowingSafeRedirects(initialUrl, options = {}) {
+  let target = new URL(initialUrl);
+  for (let redirects = 0; redirects <= 4; redirects++) {
+    if (!isAllowedShareUrl(target)) throw new Error("UNSAFE_REDIRECT");
+    const response = await fetch(target, { ...options, redirect: "manual" });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get("location");
+    if (!location) throw new Error("INVALID_REDIRECT");
+    target = new URL(location, target);
+  }
+  throw new Error("TOO_MANY_REDIRECTS");
+}
 
 const cjkCssPath = fileURLToPath(new URL("../node_modules/@fontsource-variable/noto-sans-sc/index.css", import.meta.url));
 const cjkCssDirectory = dirname(cjkCssPath);
@@ -23,7 +64,7 @@ const cjkFontCss = readFileSync(cjkCssPath, "utf8").replace(/url\((\.\/files\/[^
 });
 
 function json(response, status, body) {
-  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
   response.end(JSON.stringify(body));
 }
 
@@ -131,6 +172,7 @@ async function resolveSharedImages(target, html, cookieHeader = "") {
     const fetchedImageSources = new Set();
     for (const renderedImage of renderedImages) {
       try {
+        if (!isTrustedImageUrl(renderedImage.src)) continue;
         const captured = capturedImageResponses.get(renderedImage.src);
         const imageResponse = captured ? null : await page.request.get(renderedImage.src, { timeout: 25_000 });
         const mimeType = captured?.contentType || (imageResponse?.headers()["content-type"] || "").split(";")[0].toLowerCase();
@@ -222,6 +264,7 @@ createServer(async (request, response) => {
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage({ viewport: { width: 794, height: 1123 }, deviceScaleFactor: 1 });
+        await page.route("**/*", (route) => route.abort("blockedbyclient"));
         await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${cjkFontCss}\n${exportDocumentCss}\n${pageOverrideCss}</style></head><body>${safeDocument}</body></html>`, { waitUntil: "load" });
         await page.evaluate(async () => {
           await document.fonts.ready;
@@ -373,9 +416,9 @@ createServer(async (request, response) => {
     }
     const body = await readJson(request);
     const target = new URL(body.url);
-    if (target.protocol !== "https:" || target.hostname !== "chatgpt.com" || !sharePath.test(target.pathname)) return json(response, 400, { error: "Invalid ChatGPT share URL" });
+    if (!isAllowedShareUrl(target)) return json(response, 400, { error: "Invalid ChatGPT share URL" });
     console.info("[RETRIEVE] Fetching validated ChatGPT share");
-    const upstream = await fetch(target, { redirect: "follow", headers, signal: AbortSignal.timeout(25_000) });
+    const upstream = await fetchShareFollowingSafeRedirects(target, { headers, signal: AbortSignal.timeout(25_000) });
     if (!upstream.ok) throw new Error(`UPSTREAM_${upstream.status}`);
     const contentType = upstream.headers.get("content-type") || "";
     if (!contentType.includes("text/html")) throw new Error("UPSTREAM_NOT_HTML");
