@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 
+const privateResponseHeaders = { "Cache-Control": "private, no-store, max-age=0", Pragma: "no-cache" };
+
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { html?: unknown; config?: { paper?: unknown; orientation?: unknown; composition?: unknown; slices?: unknown; sourceHeight?: unknown } };
     if (typeof body.html !== "string" || body.html.length > 7_500_000) {
-      return NextResponse.json({ error: "Invalid export document." }, { status: 400 });
+      return NextResponse.json({ error: "Invalid export document." }, { status: 400, headers: privateResponseHeaders });
     }
     const extractorUrl = process.env.CHATGPT_EXTRACTOR_URL?.replace(/\/$/, "");
-    if (!extractorUrl) return NextResponse.json({ error: "PDF rendering is temporarily unavailable." }, { status: 503 });
-    if (!process.env.CHATGPT_EXTRACTOR_TOKEN) return NextResponse.json({ error: "PDF rendering is temporarily unavailable." }, { status: 503 });
+    if (!extractorUrl) return NextResponse.json({ error: "PDF rendering is temporarily unavailable." }, { status: 503, headers: privateResponseHeaders });
+    if (!process.env.CHATGPT_EXTRACTOR_TOKEN) return NextResponse.json({ error: "PDF rendering is temporarily unavailable." }, { status: 503, headers: privateResponseHeaders });
     const upstream = await fetch(`${extractorUrl}/render/pdf`, {
       method: "POST",
       headers: {
@@ -21,10 +23,10 @@ export async function POST(request: Request) {
     if (!upstream.ok) throw new Error(`PDF_RENDERER_${upstream.status}`);
     return new Response(await upstream.arrayBuffer(), {
       status: 200,
-      headers: { "Content-Type": "application/pdf", "Cache-Control": "no-store" },
+      headers: { "Content-Type": "application/pdf", ...privateResponseHeaders },
     });
   } catch (error) {
     console.error("PDF export failed", error);
-    return NextResponse.json({ error: "Unable to generate this PDF right now." }, { status: 502 });
+    return NextResponse.json({ error: "Unable to generate this PDF right now." }, { status: 502, headers: privateResponseHeaders });
   }
 }

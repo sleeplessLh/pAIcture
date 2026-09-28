@@ -9,6 +9,10 @@ const port = Number(process.env.PORT || 8789);
 const token = process.env.CHATGPT_EXTRACTOR_TOKEN || "";
 const isProduction = process.env.NODE_ENV === "production";
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || "").split(",").map((value) => value.trim()).filter(Boolean));
+const maxConcurrentJobs = Math.max(1, Number(process.env.MAX_CONCURRENT_JOBS || 1));
+const maxQueuedJobs = Math.max(1, Number(process.env.MAX_QUEUED_JOBS || 12));
+let activeJobs = 0;
+const queuedJobs = [];
 const sharePath = /^\/share\/[a-z0-9-]+\/?$/i;
 const headers = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
@@ -18,6 +22,29 @@ const headers = {
 
 if (isProduction && !token) {
   throw new Error("CHATGPT_EXTRACTOR_TOKEN is required in production.");
+}
+
+function acquireJobSlot() {
+  if (activeJobs < maxConcurrentJobs) {
+    activeJobs += 1;
+    return Promise.resolve(createRelease());
+  }
+  if (queuedJobs.length >= maxQueuedJobs) return null;
+  return new Promise((resolve) => queuedJobs.push(() => {
+    activeJobs += 1;
+    resolve(createRelease());
+  }));
+}
+
+function createRelease() {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeJobs = Math.max(0, activeJobs - 1);
+    const next = queuedJobs.shift();
+    if (next) queueMicrotask(next);
+  };
 }
 
 function isAllowedShareUrl(value) {
@@ -240,6 +267,12 @@ createServer(async (request, response) => {
   if (token && request.headers.authorization !== `Bearer ${token}`) return json(response, 401, { error: "Unauthorized" });
   const origin = request.headers.origin;
   if (origin && allowedOrigins.size && !allowedOrigins.has(origin)) return json(response, 403, { error: "Origin not allowed" });
+  const pendingSlot = acquireJobSlot();
+  if (!pendingSlot) {
+    response.setHeader("Retry-After", "15");
+    return json(response, 503, { error: "Service is busy. Please try again shortly." });
+  }
+  const releaseJobSlot = await pendingSlot;
   try {
     if (requestUrl.pathname === "/render/pdf") {
       const body = await readJson(request, 40_000_000);
@@ -434,5 +467,7 @@ createServer(async (request, response) => {
   } catch (error) {
     console.error("[RETRIEVE] Failed", error);
     return json(response, 502, { error: "Unable to retrieve shared conversation" });
+  } finally {
+    releaseJobSlot();
   }
 }).listen(port, "0.0.0.0", () => console.info(`[RETRIEVE] Listening on ${port}`));

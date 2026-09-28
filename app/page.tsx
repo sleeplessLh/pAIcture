@@ -284,6 +284,10 @@ export default function Home() {
       setImportStage("building");
       setConversation(imported);
       setSelectedExchangeIds(importedExchanges.length ? [importedExchanges.at(-1)!.id] : []);
+      // A shared URL is sensitive user input. Keep it only long enough to import
+      // the conversation and never leave it visible for the next person using
+      // the same browser or device.
+      setUrl("");
       setImportStage("ready"); setStatus("ready");
       requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "We could not read this conversation."); setStatus("error"); }
@@ -386,7 +390,7 @@ export default function Home() {
       <div className="hero-book" aria-hidden="true"><DocumentStack complete={status === "ready"} /></div>
       <form className={`link-card ${detected ? "has-platform" : ""}`} onSubmit={processConversation}>
         <div className="link-card-heading"><span className="tray-icon"><Link2 /></span><span><label htmlFor="conversation-url">Drop in your conversation link</label><small>Public ChatGPT share links work best</small></span></div>
-        <div className={`url-field ${status === "error" ? "invalid" : ""}`}><input id="conversation-url" value={url} onChange={(event) => { setUrl(event.target.value); if (status === "error") setStatus("idle"); }} placeholder="https://chatgpt.com/share/…" autoComplete="url" />{detected && <span className="detected"><span>{platforms[detected].mark}</span>{platforms[detected].name}<Check size={14} /></span>}<button type="submit" disabled={status === "loading"} aria-label="Create my document">{status === "loading" ? <LoaderCircle className="spin" size={20} /> : <><span>Create my document</span><ArrowRight size={20} /></>}</button></div>
+        <div className={`url-field ${status === "error" ? "invalid" : ""}`}><input id="conversation-url" name="paicture-share-url" value={url} onChange={(event) => { setUrl(event.target.value); if (status === "error") setStatus("idle"); }} placeholder="https://chatgpt.com/share/…" autoComplete="off" autoCapitalize="none" spellCheck={false} data-lpignore="true" />{detected && <span className="detected"><span>{platforms[detected].mark}</span>{platforms[detected].name}<Check size={14} /></span>}<button type="submit" disabled={status === "loading"} aria-label="Create my document">{status === "loading" ? <LoaderCircle className="spin" size={20} /> : <><span>Create my document</span><ArrowRight size={20} /></>}</button></div>
         <p className="paste-help">In ChatGPT, choose <strong>Share → Create link → Copy link</strong>. Private <code>/c/</code> links aren’t supported.</p>
         {status === "loading" && <ProgressJourney stage={importStage} />}
         {status === "error" && <div className="error-note"><EmptyDocumentVisual /><span><strong>We couldn’t read this conversation.</strong><small>{error}</small></span><button type="button" onClick={() => { setStatus("idle"); setError(""); }}>Try another link</button></div>}

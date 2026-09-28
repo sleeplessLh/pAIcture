@@ -14,6 +14,8 @@ Public ChatGPT `/share/...` links are supported. pAIcture does not request ChatG
 - **Retriever and PDF renderer:** Node.js 22 + Playwright Chromium, deployed as a private-token-protected Render web service.
 - **Import:** the application validates the ChatGPT URL, the retriever downloads the public page, and the application decodes ChatGPT's structured hydration payload.
 - **Images:** public generated-image assets are resolved during import and returned as stable data URLs for preview/export.
+- **Privacy:** pasted links and imported conversations stay in the current browser tab only. Links are cleared after a successful import, API responses are marked `private, no-store`, and the service has no conversation-history database.
+- **Concurrency:** the Chromium worker uses a bounded queue (`MAX_CONCURRENT_JOBS`, `MAX_QUEUED_JOBS`) so simultaneous visitors wait safely instead of exhausting the instance with unlimited browser processes.
 - **PDF:** semantic HTML is rendered by Chromium to a tagged, selectable-text PDF.
 - **PNG:** the same canonical document renderer is rasterized at high DPI in the browser and downloaded as page PNGs/ZIP.
 - **Storage:** no database or persistent user-content storage is required. Conversation data is processed per request and in the browser.
@@ -45,6 +47,8 @@ Use one long random value for `CHATGPT_EXTRACTOR_TOKEN` in both the application 
 | `CHATGPT_EXTRACTOR_URL` | Application | HTTPS base URL of the Render extractor. |
 | `CHATGPT_EXTRACTOR_TOKEN` | Both | Shared bearer secret. Required by the production extractor. Never expose it to client code. |
 | `ALLOWED_ORIGINS` | Extractor | Comma-separated browser origins allowed to call the service. Server-to-server calls are authenticated by token. |
+| `MAX_CONCURRENT_JOBS` | Extractor | Maximum active Chromium-backed jobs. Defaults to `1`, which is appropriate for the current low-memory Render instance. |
+| `MAX_QUEUED_JOBS` | Extractor | Maximum waiting jobs before returning a retryable busy response. Defaults to `12`. |
 | `NODE_ENV` | Extractor | Must be `production` in production; makes a missing token a startup error. |
 | `PLAYWRIGHT_BROWSERS_PATH` | Extractor | Browser installation path configuration used by Render. |
 | `PORT` | Extractor | Listening port supplied by the hosting provider. |

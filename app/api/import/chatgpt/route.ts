@@ -3,15 +3,16 @@ import { adapters, parseChatGptShareHtml } from "../../../../lib/conversation/ad
 import type { ResolvedImageAssets } from "../../../../lib/conversation/types";
 
 const friendlyError = "Unable to import this shared conversation. Please make sure this is a valid ChatGPT shared conversation link and that it is still publicly accessible.";
+const privateResponseHeaders = { "Cache-Control": "private, no-store, max-age=0", Pragma: "no-cache" };
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
     const body = await request.json() as { url?: unknown };
-    if (typeof body.url !== "string") return NextResponse.json({ error: friendlyError }, { status: 400 });
+    if (typeof body.url !== "string") return NextResponse.json({ error: friendlyError }, { status: 400, headers: privateResponseHeaders });
     const url = new URL(body.url.trim());
     const adapter = adapters[0];
-    if (!adapter.matches(url)) return NextResponse.json({ error: friendlyError }, { status: 400 });
+    if (!adapter.matches(url)) return NextResponse.json({ error: friendlyError }, { status: 400, headers: privateResponseHeaders });
     console.info("[IMPORT] URL validated", { host: url.host });
     const extractorUrl = process.env.CHATGPT_EXTRACTOR_URL?.replace(/\/$/, "");
     let conversation;
@@ -42,10 +43,10 @@ export async function POST(request: Request) {
     const userMessages = conversation.messages.filter((message) => message.role === "user").length;
     console.info("[IMPORT] Conversation discovered", { title: conversation.title, messages: conversation.messages.length, userMessages, assistantMessages: conversation.messages.length - userMessages });
     console.info("[IMPORT] Normalization complete", { elapsedMs: Date.now() - startedAt });
-    return NextResponse.json(conversation);
+    return NextResponse.json(conversation, { headers: privateResponseHeaders });
   } catch (error) {
     // Keep network/debug detail in server logs, never in the primary UI.
     console.error("ChatGPT shared-link import failed", error);
-    return NextResponse.json({ error: friendlyError }, { status: 422 });
+    return NextResponse.json({ error: friendlyError }, { status: 422, headers: privateResponseHeaders });
   }
 }
