@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { html?: unknown; config?: { paper?: unknown; orientation?: unknown } };
+    const body = await request.json() as { html?: unknown; config?: { paper?: unknown; orientation?: unknown; composition?: unknown; slices?: unknown; sourceHeight?: unknown } };
     if (typeof body.html !== "string" || body.html.length > 7_500_000) {
       return NextResponse.json({ error: "Invalid export document." }, { status: 400 });
     }

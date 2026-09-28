@@ -5,7 +5,7 @@ import { chromium } from "playwright";
 const baseUrl = process.env.PAICTURE_TEST_URL || "http://127.0.0.1:5173";
 const output = path.resolve("output/export-studio-ui");
 await mkdir(output, { recursive: true });
-const paragraphs = Array.from({ length: 18 }, (_, index) => `<p><strong>Section ${index + 1}.</strong> This long response verifies deterministic pagination, multilingual wrapping, and complete content. 这是用于验证中文换行、分页和清晰度的内容。</p>`).join("");
+const paragraphs = Array.from({ length: 120 }, (_, index) => `<p><strong>Section ${index + 1}.</strong> This long response verifies deterministic pagination, multilingual wrapping, and complete content. 这是用于验证中文换行、分页和清晰度的内容。</p>`).join("");
 const conversation = {
   title: "Export Studio Pagination Validation",
   platform: "chatgpt",
@@ -26,20 +26,36 @@ try {
   await page.getByRole("button", { name: "Create my document" }).click();
   await page.getByRole("button", { name: "Select all" }).click();
   await page.locator(".page-preview img").first().waitFor({ state: "visible", timeout: 30_000 });
-  await page.waitForFunction(() => document.querySelectorAll(".page-preview").length >= 2, undefined, { timeout: 30_000 });
-  const initialPages = await page.locator(".page-preview").count();
-  if (initialPages < 2) throw new Error(`Expected a multi-page preview, received ${initialPages} page(s).`);
-  await page.getByRole("button", { name: "PNG" }).click();
-  await page.getByRole("button", { name: "A3" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".page-preview").length >= 8, undefined, { timeout: 60_000 });
+  const logicalPageCount = await page.locator(".page-preview").count();
+  const portraitFirstPage = await page.locator(".page-preview img").first().getAttribute("src");
   await page.getByRole("button", { name: "Landscape" }).click();
-  await page.getByRole("button", { name: "2 in 1" }).click();
-  await page.locator(".composition-preview img").first().waitFor({ state: "visible", timeout: 30_000 });
-  await page.screenshot({ path: path.join(output, "export-studio-a3-landscape.png"), fullPage: true });
+  await page.waitForFunction((previousSrc) => !document.querySelector(".preview-rendering") && document.querySelectorAll(".page-preview").length > 0 && document.querySelector(".page-preview img")?.getAttribute("src") !== previousSrc, portraitFirstPage, { timeout: 60_000 });
+  const landscapeLogicalPageCount = await page.locator(".page-preview").count();
+  const landscapeFirstPage = await page.locator(".page-preview img").first().getAttribute("src");
+  await page.getByRole("button", { name: "4 in 1" }).click();
+  await page.waitForFunction(({ logicalCount, previousSrc }) => !document.querySelector(".preview-rendering") && document.querySelectorAll(".page-preview").length === Math.ceil(logicalCount / 4) && document.querySelector(".page-preview img")?.getAttribute("src") !== previousSrc, { logicalCount: landscapeLogicalPageCount, previousSrc: landscapeFirstPage }, { timeout: 60_000 });
+  const pdfOutputPages = await page.locator(".page-preview").count();
+  const pdfDownloadPromise = page.waitForEvent("download", { timeout: 90_000 });
+  await page.getByRole("button", { name: /Create PDF/ }).click();
+  const pdfDownload = await pdfDownloadPromise;
+  await pdfDownload.saveAs(path.join(output, pdfDownload.suggestedFilename()));
+  await page.getByRole("button", { name: "PNG" }).click();
+  await page.waitForFunction((expected) => document.querySelectorAll(".page-preview").length === expected, pdfOutputPages, { timeout: 30_000 });
+  const pngOutputPages = await page.locator(".page-preview").count();
+  if (pngOutputPages !== pdfOutputPages) throw new Error(`PDF/PNG preview mismatch: ${pdfOutputPages} vs ${pngOutputPages}.`);
+  await page.screenshot({ path: path.join(output, "export-studio-a4-landscape-4-in-1.png"), fullPage: true });
   const downloadPromise = page.waitForEvent("download", { timeout: 60_000 });
   await page.getByRole("button", { name: /Create PNG images/ }).click();
   const download = await downloadPromise;
   await download.saveAs(path.join(output, download.suggestedFilename()));
-  console.log(JSON.stringify({ initialPages, composedImages: await page.locator(".composition-preview figure").count(), download: download.suggestedFilename() }));
+  const beforeRealtimeUpdate = await page.locator(".page-preview img").first().getAttribute("src");
+  await page.getByRole("button", { name: "A3", exact: true }).click();
+  await page.getByRole("button", { name: "Dark", exact: true }).click();
+  await page.getByRole("button", { name: "2 in 1" }).click();
+  await page.waitForFunction((previousSrc) => !document.querySelector(".preview-rendering") && document.querySelectorAll(".page-preview").length > 0 && document.querySelector(".page-preview img")?.getAttribute("src") !== previousSrc, beforeRealtimeUpdate, { timeout: 60_000 });
+  const realtimePreviewPages = await page.locator(".page-preview").count();
+  console.log(JSON.stringify({ logicalPageCount, landscapeLogicalPageCount, pdfOutputPages, pngOutputPages, realtimePreviewPages, realtimeConfig: "A3 landscape dark 2-in-1", pdf: pdfDownload.suggestedFilename(), png: download.suggestedFilename() }));
 } finally {
   await browser.close();
 }

@@ -64,7 +64,9 @@ function exportFilename(title: string) {
   return title.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 80) || "paicture-chatgpt-export";
 }
 
-async function renderDocumentPages(source: HTMLElement, config: ExportConfig, captureScale: number) {
+type LogicalPageRender = { canvas: HTMLCanvasElement; offset: number; end: number };
+
+async function renderDocumentPages(source: HTMLElement, config: ExportConfig, captureScale: number): Promise<LogicalPageRender[]> {
   const { default: html2canvas } = await import("html2canvas");
   const { width: pageWidth, height: pageHeight, margin } = pageGeometry(config);
   const printableWidth = pageWidth - margin * 2;
@@ -79,20 +81,25 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
     .filter((position) => position > 0 && position < totalHeight);
   const lineBreaks = [...source.querySelectorAll(".conversation-message-content p, .conversation-message-content li, .conversation-message-content pre")]
     .flatMap((element) => {
-      const rect = element.getBoundingClientRect();
-      const top = rect.top - sourceTop;
-      const bottom = rect.bottom - sourceTop;
-      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
-      if (!Number.isFinite(lineHeight) || rect.height < lineHeight * 3) return [];
-      const positions: number[] = [];
-      for (let position = top + lineHeight * 2; position < bottom - lineHeight; position += lineHeight) positions.push(Math.round(position));
-      return positions;
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rects = [...range.getClientRects()].sort((a, b) => a.top - b.top || a.left - b.left);
+      const lines: Array<{ top: number; bottom: number }> = [];
+      for (const rect of rects) {
+        const previous = lines.at(-1);
+        if (previous && Math.abs(previous.top - rect.top) < 1.5) previous.bottom = Math.max(previous.bottom, rect.bottom);
+        else lines.push({ top: rect.top, bottom: rect.bottom });
+      }
+      return lines.slice(1).map((line, index) => {
+        const previous = lines[index];
+        return Math.round((previous.bottom + line.top) / 2 - sourceTop);
+      });
     });
   const safeBreaks = [...elementBreaks, ...lineBreaks].sort((a, b) => a - b);
   const protectedRanges = [...source.querySelectorAll(".conversation-message.user, pre, blockquote, table, .conversation-image, img")]
     .map((element) => { const rect = element.getBoundingClientRect(); return { top: Math.round(rect.top - sourceTop), bottom: Math.round(rect.bottom - sourceTop) }; })
     .filter((range) => range.bottom - range.top < printableHeight);
-  const pages: HTMLCanvasElement[] = [];
+  const pages: LogicalPageRender[] = [];
   for (let offset = 0; offset < totalHeight;) {
     const idealEnd = Math.min(offset + printableHeight, totalHeight);
     const protectedAtEnd = protectedRanges.find((range) => range.top < idealEnd && range.bottom > idealEnd && range.top > offset + printableHeight * .3);
@@ -100,7 +107,10 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
     const earliestBreak = offset + Math.floor(printableHeight * .68);
     const safeEnd = safeBreaks.filter((position) => position >= earliestBreak && position <= targetEnd).at(-1);
     const end = idealEnd === totalHeight ? totalHeight : safeEnd || targetEnd;
-    const sliceHeight = Math.max(1, end - offset);
+    // Start continuation captures just past the midpoint break. html2canvas can
+    // retain a sub-pixel antialiasing fringe from the preceding line otherwise.
+    const captureOffset = offset === 0 ? 0 : Math.min(end - 1, offset + 2);
+    const sliceHeight = Math.max(1, end - captureOffset);
     const page = document.createElement("canvas");
     page.width = Math.ceil(pageWidth * captureScale);
     page.height = Math.ceil(pageHeight * captureScale);
@@ -109,15 +119,21 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
     const paperColor = source.dataset.appearance === "dark" ? "#202225" : "#fbfaf7";
     context.fillStyle = paperColor;
     context.fillRect(0, 0, page.width, page.height);
-    const slice = await html2canvas(source, { scale: captureScale, backgroundColor: paperColor, useCORS: true, logging: false, x: 0, y: offset, width: source.scrollWidth, height: sliceHeight, windowWidth: document.documentElement.scrollWidth, windowHeight: Math.max(document.documentElement.scrollHeight, totalHeight), scrollX: 0, scrollY: 0 });
+    const slice = await html2canvas(source, { scale: captureScale, backgroundColor: paperColor, useCORS: true, logging: false, x: 0, y: captureOffset, width: source.scrollWidth, height: sliceHeight, windowWidth: document.documentElement.scrollWidth, windowHeight: Math.max(document.documentElement.scrollHeight, totalHeight), scrollX: 0, scrollY: 0 });
     context.drawImage(slice, 0, 0, slice.width, slice.height, margin * captureScale, margin * captureScale, printableWidth * captureScale, sliceHeight * captureScale);
-    context.fillStyle = source.dataset.appearance === "dark" ? "#99968f" : "#8a8a85";
-    context.font = `${9 * captureScale}px ${documentTheme.fontFamily}`;
-    context.textAlign = "left";
-    context.fillText("pAIcture", margin * captureScale, (pageHeight - 24) * captureScale);
-    context.textAlign = "right";
-    context.fillText(String(pages.length + 1), (pageWidth - margin) * captureScale, (pageHeight - 24) * captureScale);
-    pages.push(page);
+    if (offset > 0) {
+      context.fillStyle = paperColor;
+      context.fillRect(margin * captureScale, margin * captureScale, printableWidth * captureScale, 18 * captureScale);
+    }
+    if (config.composition === 1) {
+      context.fillStyle = source.dataset.appearance === "dark" ? "#99968f" : "#8a8a85";
+      context.font = `${9 * captureScale}px ${documentTheme.fontFamily}`;
+      context.textAlign = "left";
+      context.fillText("pAIcture", margin * captureScale, (pageHeight - 24) * captureScale);
+      context.textAlign = "right";
+      context.fillText(String(pages.length + 1), (pageWidth - margin) * captureScale, (pageHeight - 24) * captureScale);
+    }
+    pages.push({ canvas: page, offset, end });
     offset = end;
   }
   source.classList.remove("export-capture");
@@ -125,33 +141,59 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
   return pages;
 }
 
-function composePageCanvases(pages: HTMLCanvasElement[], perImage: PageComposition, config: ExportConfig) {
+function composePageCanvases(logicalPages: LogicalPageRender[], perImage: PageComposition, config: ExportConfig) {
+  const pages = logicalPages.map(({ canvas }) => canvas);
   if (perImage === 1) return pages;
   const groups: HTMLCanvasElement[] = [];
+  const totalGroups = Math.ceil(pages.length / perImage);
   for (let start = 0; start < pages.length; start += perImage) {
     const items = pages.slice(start, start + perImage);
     const pageWidth = pages[0].width;
     const pageHeight = pages[0].height;
-    const gap = Math.round(Math.min(pageWidth, pageHeight) * .025);
-    const padding = gap;
-    const columns = perImage === 4 ? 2 : config.orientation === "portrait" ? 2 : 1;
-    const rows = Math.ceil(items.length / columns);
+    const captureScale = pageWidth / pageGeometry(config).width;
+    const margin = Math.round(pageGeometry(config).margin * captureScale);
+    const gap = Math.round(Math.min(pageWidth, pageHeight) * .018);
+    const columns = perImage === 4 ? 2 : config.orientation === "landscape" ? 2 : 1;
+    const rows = perImage === 4 ? 2 : config.orientation === "landscape" ? 1 : 2;
+    const cellWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
+    const cellHeight = (pageHeight - margin * 2 - gap * (rows - 1)) / rows;
+    const pageScale = Math.min(cellWidth / pageWidth, cellHeight / pageHeight);
+    const renderedWidth = pageWidth * pageScale;
+    const renderedHeight = pageHeight * pageScale;
+    const occupiedRows = Math.ceil(items.length / columns);
+    const verticalOffset = (rows - occupiedRows) * (cellHeight + gap) / 2;
     const canvas = document.createElement("canvas");
-    canvas.width = padding * 2 + columns * pageWidth + (columns - 1) * gap;
-    canvas.height = padding * 2 + rows * pageHeight + (rows - 1) * gap;
+    canvas.width = pageWidth;
+    canvas.height = pageHeight;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Image composition is unavailable.");
-    context.fillStyle = "#dedbd4";
+    const sample = pages[0].getContext("2d")?.getImageData(0, 0, 1, 1).data;
+    context.fillStyle = sample ? `rgb(${sample[0]} ${sample[1]} ${sample[2]})` : "#fbfaf7";
     context.fillRect(0, 0, canvas.width, canvas.height);
-    const finalRowCount = items.length - (rows - 1) * columns;
     items.forEach((page, index) => {
       const row = Math.floor(index / columns);
       const column = index % columns;
-      const isFinalRow = row === rows - 1;
-      const rowCount = isFinalRow ? finalRowCount : columns;
-      const rowOffset = isFinalRow ? (columns - rowCount) * (pageWidth + gap) / 2 : 0;
-      context.drawImage(page, padding + rowOffset + column * (pageWidth + gap), padding + row * (pageHeight + gap));
+      const occupiedColumns = Math.min(columns, items.length - row * columns);
+      const rowWidth = occupiedColumns * cellWidth + (occupiedColumns - 1) * gap;
+      const rowOffset = (pageWidth - rowWidth) / 2;
+      const x = rowOffset + column * (cellWidth + gap) + (cellWidth - renderedWidth) / 2;
+      const y = margin + verticalOffset + row * (cellHeight + gap) + (cellHeight - renderedHeight) / 2;
+      context.save();
+      context.shadowColor = "rgba(40, 35, 30, .14)";
+      context.shadowBlur = 5 * captureScale;
+      context.shadowOffsetY = 2 * captureScale;
+      context.drawImage(page, x, y, renderedWidth, renderedHeight);
+      context.restore();
+      context.strokeStyle = "rgba(100, 95, 88, .24)";
+      context.lineWidth = Math.max(1, captureScale);
+      context.strokeRect(x, y, renderedWidth, renderedHeight);
     });
+    context.fillStyle = "#8a8a85";
+    context.font = `${9 * captureScale}px ${documentTheme.fontFamily}`;
+    context.textAlign = "left";
+    context.fillText("pAIcture", margin, pageHeight - 24 * captureScale);
+    context.textAlign = "right";
+    context.fillText(`${groups.length + 1} / ${totalGroups}`, pageWidth - margin, pageHeight - 24 * captureScale);
     groups.push(canvas);
   }
   return groups;
@@ -187,8 +229,8 @@ export default function Home() {
   const [orientation, setOrientation] = useState<Orientation>("portrait");
   const [composition, setComposition] = useState<PageComposition>(1);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
-  const [previewCompositions, setPreviewCompositions] = useState<string[]>([]);
   const [previewRendering, setPreviewRendering] = useState(false);
+  const [previewFit, setPreviewFit] = useState<"page" | "width">("width");
   const [exporting, setExporting] = useState(false);
   const [exportPhase, setExportPhase] = useState<"idle" | "rendering" | "downloading" | "done" | "error">("idle");
   const [exportError, setExportError] = useState("");
@@ -212,21 +254,21 @@ export default function Home() {
     localStorage.setItem("paicture-export-config", JSON.stringify({ ...exportConfig, appearance: documentAppearance }));
   }, [exportConfig, documentAppearance]);
   useEffect(() => {
-    if (!selectedMessages.length || !previewRef.current) { setPreviewPages([]); setPreviewCompositions([]); return; }
+    if (!selectedMessages.length || !previewRef.current) { setPreviewPages([]); return; }
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setPreviewRendering(true);
       try {
-        const pages = await renderDocumentPages(previewRef.current!, exportConfig, 1);
+        const logicalPages = await renderDocumentPages(previewRef.current!, exportConfig, 1);
+        const finalPages = composePageCanvases(logicalPages, composition, exportConfig);
         if (cancelled) return;
-        setPreviewPages(pages.map((page) => page.toDataURL("image/png")));
-        setPreviewCompositions(format === "images" ? composePageCanvases(pages, composition, exportConfig).map((page) => page.toDataURL("image/jpeg", .82)) : []);
+        setPreviewPages(finalPages.map((page) => page.toDataURL("image/png")));
       } catch (reason) {
         console.error("[PREVIEW] Page rendering failed", reason);
       } finally { if (!cancelled) setPreviewRendering(false); }
     }, 260);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [selectedMessages, documentAppearance, exportConfig, format, composition]);
+  }, [selectedMessages, documentAppearance, exportConfig, composition]);
 
   async function processConversation(event: React.FormEvent) {
     event.preventDefault();
@@ -267,10 +309,11 @@ export default function Home() {
       await waitForDocumentReady(source);
       console.info("[EXPORT] Render ready");
       if (format === "pdf") {
+        const logicalPages = await renderDocumentPages(source, exportConfig, 1);
         const response = await fetch("/api/export/pdf", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html: source.outerHTML, config: exportConfig }),
+          body: JSON.stringify({ html: source.outerHTML, config: { ...exportConfig, sourceHeight: logicalPages.at(-1)?.end, slices: logicalPages.map(({ offset, end }) => ({ offset, end })) } }),
         });
         if (!response.ok) {
           const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -286,11 +329,11 @@ export default function Home() {
         return;
       }
       const captureScale = 2;
-      const pages = await renderDocumentPages(source, exportConfig, captureScale);
-      const outputs = composePageCanvases(pages, composition, exportConfig);
+      const logicalPages = await renderDocumentPages(source, exportConfig, captureScale);
+      const outputs = composePageCanvases(logicalPages, composition, exportConfig);
       const maxBytes = Math.max(...outputs.map((page) => page.width * page.height * 4));
       if (maxBytes > 420_000_000) throw new Error("This page composition would exceed the browser's safe image memory limit. Choose fewer pages per image or a smaller paper size.");
-      console.info("[PNG] Paginated render complete", { pages: pages.length, outputs: outputs.length, scale: captureScale, config: exportConfig });
+      console.info("[PNG] Paginated render complete", { pages: logicalPages.length, outputs: outputs.length, scale: captureScale, config: exportConfig });
       const pngFiles: Record<string, Uint8Array> = {};
       for (let page = 0; page < outputs.length; page++) {
         const blob = await new Promise<Blob | null>((resolve) => outputs[page].toBlob(resolve, "image/png"));
@@ -308,7 +351,7 @@ export default function Home() {
         downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${slug}-images.zip`);
       }
       setExportPhase("done");
-      console.info("[EXPORT] Download triggered", { pages: pages.length, files: outputs.length });
+      console.info("[EXPORT] Download triggered", { pages: logicalPages.length, files: outputs.length });
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "The export could not be generated.";
       console.error("[EXPORT] Failed", reason);
@@ -356,26 +399,26 @@ export default function Home() {
       {exchanges.length ? <section className="exchange-selector" aria-labelledby="exchange-selector-title"><div className="exchange-selector-head"><div><h3 id="exchange-selector-title">Choose Q&amp;A exchanges</h3><p><strong>{selectedExchangeIds.length}</strong> of {exchanges.length} selected · Complete answers are always exported.</p></div><div className="exchange-actions"><button type="button" onClick={() => updateSelection(exchanges.map(({ id }) => id))}>Select all</button><button type="button" onClick={() => updateSelection([])}>Clear all</button><button type="button" onClick={() => updateSelection([exchanges.at(-1)!.id])}>Latest only</button></div></div><div className="exchange-list">{exchanges.map((exchange) => { const selected = selectedExchangeIds.includes(exchange.id); return <label className={`exchange-option ${selected ? "selected" : ""}`} key={exchange.id}><input type="checkbox" checked={selected} onChange={() => toggleExchange(exchange)} /><span className="exchange-number">{String(exchange.index).padStart(2, "0")}</span><span className="exchange-copy"><strong>{exchangePreview(exchange.userMessages) || "Question"}</strong><small>{exchangePreview(exchange.assistantMessages) || "Answer"}</small></span><span className="exchange-check" aria-hidden="true">{selected ? <Check size={16} /> : null}</span></label>; })}</div></section> : <div className="selection-warning" role="alert"><strong>No complete Q&amp;A exchange was found.</strong><span>pAIcture will not export the full conversation automatically. Try another complete shared conversation.</span></div>}
       <div className="preview-shell">
         <div className="preview-column">
-          <div className="preview-label"><span className="section-index">02 / Preview</span><span>{selectedMessages.length ? `${previewPages.length || "…"} page${previewPages.length === 1 ? "" : "s"} · ${paperSizes[paper].label} ${orientation}` : "Nothing selected"}</span></div>
+          <div className="preview-label"><span className="section-index">02 / Final Preview</span><span>{selectedMessages.length ? `${previewPages.length || "…"} output ${format === "pdf" ? "page" : "image"}${previewPages.length === 1 ? "" : "s"} · ${paperSizes[paper].label} ${orientation} · ${composition}-in-1` : "Nothing selected"}</span>{selectedMessages.length ? <span className="preview-fit-controls" aria-label="Preview zoom"><button type="button" className={previewFit === "page" ? "selected" : ""} onClick={() => setPreviewFit("page")}>Fit page</button><button type="button" className={previewFit === "width" ? "selected" : ""} onClick={() => setPreviewFit("width")}>Fit width</button></span> : null}</div>
           {selectedMessages.length ? <>
             <div className="export-source-host" aria-hidden="true"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={selectedMessages} dateLabel={documentDate} appearance={documentAppearance} /></div>
-            <div className="page-preview-stage">
-              {previewRendering ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the pages…</strong></div> : <div className="page-preview-list">{previewPages.map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>Page {index + 1}</figcaption><img src={src} alt={`Export preview page ${index + 1}`} /></figure>)}</div>}
+            <div className={`page-preview-stage fit-${previewFit}`}>
+              {previewRendering ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the final pages…</strong></div> : <div className="page-preview-list">{previewPages.map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>{format === "pdf" ? "Output page" : "Image"} {index + 1}</figcaption><img src={src} alt={`Final ${format === "pdf" ? "PDF page" : "PNG image"} ${index + 1}`} /></figure>)}</div>}
             </div>
-            {format === "images" && composition > 1 && previewCompositions.length ? <section className="composition-preview"><div><strong>Final PNG composition</strong><span>{composition} pages per image · {previewCompositions.length} file{previewCompositions.length === 1 ? "" : "s"}</span></div><div>{previewCompositions.map((src, index) => <figure key={index}><figcaption>Image {index + 1}</figcaption><img src={src} alt={`Final PNG composition ${index + 1}`} /></figure>)}</div></section> : null}
           </> : <div className="empty-preview"><EmptyDocumentVisual /><strong>Your conversation will appear here.</strong><span>Select at least one Q&amp;A exchange to build the preview.</span></div>}
         </div>
         <aside className={`export-panel ${exportPhase === "done" ? "is-complete" : ""}`}>
           <span className="section-index">03 / Export Studio</span>
-          {exportPhase === "done" ? <div className="completion-card"><DocumentStack complete compact /><Sparkle /><h3>Your document is ready.</h3><p>The download has started in your browser.</p></div> : <><h3>Choose your format</h3><div className="format-grid"><button type="button" className={format === "pdf" ? "selected" : ""} onClick={() => { setFormat("pdf"); setExportPhase("idle"); setExportError(""); }}><span className="format-icon"><FileText /></span><span><strong>PDF</strong><small>Sharp, selectable text</small></span><i>{format === "pdf" && <Check size={15} />}</i></button><button type="button" className={format === "images" ? "selected" : ""} onClick={() => { setFormat("images"); setExportPhase("idle"); setExportError(""); }}><span className="format-icon"><FileImage /></span><span><strong>PNG</strong><small>High-resolution pages</small></span><i>{format === "images" && <Check size={15} />}</i></button></div></>}
+          <h3>Choose your format</h3><div className="format-grid"><button type="button" className={format === "pdf" ? "selected" : ""} onClick={() => { setFormat("pdf"); setExportPhase("idle"); setExportError(""); }}><span className="format-icon"><FileText /></span><span><strong>PDF</strong><small>Sharp, selectable text</small></span><i>{format === "pdf" && <Check size={15} />}</i></button><button type="button" className={format === "images" ? "selected" : ""} onClick={() => { setFormat("images"); setExportPhase("idle"); setExportError(""); }}><span className="format-icon"><FileImage /></span><span><strong>PNG</strong><small>High-resolution pages</small></span><i>{format === "images" && <Check size={15} />}</i></button></div>
+          {exportPhase === "done" ? <div className="completion-card"><DocumentStack complete compact /><Sparkle /><h3>Your document is ready.</h3><p>The download has started in your browser.</p></div> : null}
           <details className="customize" open>
             <summary><span>{paperSizes[paper].label} · {orientation === "portrait" ? "Portrait" : "Landscape"} · {documentAppearance === "light" ? "Light" : "Dark"}</span><span>Setup <ChevronDown size={14} /></span></summary>
             <div className="export-customization">
               <p>Every change updates the paginated preview automatically.</p>
               <fieldset><legend>Appearance</legend><button type="button" className={documentAppearance === "light" ? "selected" : ""} onClick={() => setDocumentAppearance("light")}>Light</button><button type="button" className={documentAppearance === "dark" ? "selected" : ""} onClick={() => setDocumentAppearance("dark")}>Dark</button></fieldset>
               <fieldset><legend>Paper</legend>{(Object.keys(paperSizes) as PaperSize[]).map((size) => <button type="button" key={size} className={paper === size ? "selected" : ""} onClick={() => setPaper(size)}>{paperSizes[size].label}</button>)}</fieldset>
-              <fieldset><legend>Orientation</legend><button type="button" className={orientation === "portrait" ? "selected" : ""} onClick={() => setOrientation("portrait")}>Portrait</button><button type="button" className={orientation === "landscape" ? "selected" : ""} onClick={() => { setOrientation("landscape"); if (composition === 4) setComposition(2); }}>Landscape</button></fieldset>
-              {format === "images" ? <fieldset><legend>Pages per PNG</legend>{([1, 2, ...(orientation === "portrait" ? [4] : [])] as PageComposition[]).map((count) => <button type="button" key={count} className={composition === count ? "selected" : ""} onClick={() => setComposition(count)}>{count} in 1</button>)}</fieldset> : null}
+              <fieldset><legend>Orientation</legend><button type="button" className={orientation === "portrait" ? "selected" : ""} onClick={() => setOrientation("portrait")}>Portrait</button><button type="button" className={orientation === "landscape" ? "selected" : ""} onClick={() => setOrientation("landscape")}>Landscape</button></fieldset>
+              <fieldset><legend>Logical pages per output</legend>{([1, 2, 4] as PageComposition[]).map((count) => <button type="button" key={count} className={composition === count ? "selected" : ""} onClick={() => setComposition(count)}>{count} in 1</button>)}</fieldset>
               <p className="quality-note"><Check size={13} /> High quality · balanced 1:1 margins</p>
             </div>
           </details>

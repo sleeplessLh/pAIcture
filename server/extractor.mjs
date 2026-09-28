@@ -206,6 +206,14 @@ createServer(async (request, response) => {
       const orientation = body.config?.orientation === "landscape" ? "landscape" : "portrait";
       const paperFormat = paper === "a3" ? "A3" : paper === "letter" ? "Letter" : "A4";
       const margin = paper === "a3" ? "21.7mm" : "18mm";
+      const baseGeometry = paper === "a3" ? { width: 1123, height: 1587, margin: 82 } : paper === "letter" ? { width: 816, height: 1056, margin: 68 } : { width: 794, height: 1123, margin: 68 };
+      const geometry = orientation === "landscape" ? { width: baseGeometry.height, height: baseGeometry.width, margin: baseGeometry.margin } : baseGeometry;
+      const composition = [1, 2, 4].includes(body.config?.composition) ? body.config.composition : 1;
+      const slices = Array.isArray(body.config?.slices) ? body.config.slices
+        .filter((slice) => Number.isFinite(slice?.offset) && Number.isFinite(slice?.end) && slice.offset >= 0 && slice.end > slice.offset)
+        .slice(0, 500)
+        .map((slice) => ({ offset: Math.round(slice.offset), end: Math.round(slice.end) })) : [];
+      const sourceHeight = Number.isFinite(body.config?.sourceHeight) && body.config.sourceHeight > 0 ? body.config.sourceHeight : null;
       const pageOverrideCss = `@page { size: ${paperFormat} ${orientation}; margin: ${margin}; }`;
       const safeDocument = body.html
         .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -227,6 +235,116 @@ createServer(async (request, response) => {
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           document.documentElement.dataset.exportReady = "true";
         });
+        if (slices.length) {
+          const layoutMetrics = await page.evaluate(({ slices, sourceHeight, composition, geometry, orientation }) => {
+            const source = document.querySelector(".conversation-document");
+            if (!(source instanceof HTMLElement)) throw new Error("EXPORT_DOCUMENT_NOT_FOUND");
+            const serverSourceHeight = source.scrollHeight;
+            const heightScale = sourceHeight ? serverSourceHeight / sourceHeight : 1;
+            const { width: pageWidth, height: pageHeight, margin } = geometry;
+            const printableWidth = pageWidth - margin * 2;
+            const printableHeight = pageHeight - margin * 2;
+            const sourceTop = source.getBoundingClientRect().top;
+            const elementBreaks = [...source.querySelectorAll(".conversation-exchange, .conversation-message, .conversation-message-content > *:not(:first-child), tr")]
+              .map((element) => Math.round(element.getBoundingClientRect().top - sourceTop))
+              .filter((position) => position > 0 && position < serverSourceHeight);
+            const lineBreaks = [...source.querySelectorAll(".conversation-message-content p, .conversation-message-content li, .conversation-message-content pre")]
+              .flatMap((element) => {
+                const range = document.createRange();
+                range.selectNodeContents(element);
+                const rects = [...range.getClientRects()].sort((a, b) => a.top - b.top || a.left - b.left);
+                const lines = [];
+                for (const rect of rects) {
+                  const previous = lines.at(-1);
+                  if (previous && Math.abs(previous.top - rect.top) < 1.5) previous.bottom = Math.max(previous.bottom, rect.bottom);
+                  else lines.push({ top: rect.top, bottom: rect.bottom });
+                }
+                return lines.slice(1).map((line, index) => Math.round((lines[index].bottom + line.top) / 2 - sourceTop));
+              });
+            const safeBreaks = [...elementBreaks, ...lineBreaks].sort((a, b) => a - b);
+            const protectedRanges = [...source.querySelectorAll(".conversation-message.user, pre, blockquote, table, .conversation-image, img")]
+              .map((element) => { const rect = element.getBoundingClientRect(); return { top: Math.round(rect.top - sourceTop), bottom: Math.round(rect.bottom - sourceTop) }; })
+              .filter((range) => range.bottom - range.top < printableHeight);
+            const scaledSlices = [];
+            for (let offset = 0; offset < serverSourceHeight;) {
+              const idealEnd = Math.min(offset + printableHeight, serverSourceHeight);
+              const protectedAtEnd = protectedRanges.find((range) => range.top < idealEnd && range.bottom > idealEnd && range.top > offset + printableHeight * .3);
+              const targetEnd = protectedAtEnd?.top || idealEnd;
+              const earliestBreak = offset + Math.floor(printableHeight * .68);
+              const safeEnd = safeBreaks.filter((position) => position >= earliestBreak && position <= targetEnd).at(-1);
+              const end = idealEnd === serverSourceHeight ? serverSourceHeight : safeEnd || targetEnd;
+              scaledSlices.push({ offset, end });
+              offset = end;
+            }
+            const paperColor = source.dataset.appearance === "dark" ? "#202225" : "#fbfaf7";
+            const gap = Math.round(Math.min(pageWidth, pageHeight) * .018);
+            const columns = composition === 4 ? 2 : orientation === "landscape" ? 2 : 1;
+            const rows = composition === 4 ? 2 : orientation === "landscape" ? 1 : 2;
+            const cellWidth = (printableWidth - gap * (columns - 1)) / columns;
+            const cellHeight = (printableHeight - gap * (rows - 1)) / rows;
+            const logicalScale = Math.min(cellWidth / pageWidth, cellHeight / pageHeight);
+            const renderedWidth = pageWidth * logicalScale;
+            const renderedHeight = pageHeight * logicalScale;
+            const style = document.createElement("style");
+            style.textContent = `html,body{margin:0!important;padding:0!important;background:${paperColor}!important}.final-output-page{position:relative;width:${printableWidth}px;height:${printableHeight}px;box-sizing:border-box;break-after:page;page-break-after:always;overflow:hidden;background:${paperColor}}.final-output-page:last-child{break-after:auto;page-break-after:auto}.final-grid{position:relative;width:100%;height:100%;display:grid;grid-template-columns:repeat(${columns},${cellWidth}px);grid-template-rows:repeat(${rows},${cellHeight}px);gap:${gap}px}.final-tile{position:relative;width:${cellWidth}px;height:${cellHeight}px;overflow:visible;justify-self:center;align-self:center}.logical-paper{position:absolute;width:${pageWidth}px;height:${pageHeight}px;transform:scale(${logicalScale});transform-origin:top left;background:${paperColor};box-shadow:0 0 0 1px rgba(100,95,88,.24)}.logical-window{position:absolute;left:${margin}px;top:${margin}px;width:${printableWidth}px;height:${printableHeight}px;overflow:hidden}.logical-window>.conversation-document{position:absolute!important;left:0!important;width:${printableWidth}px!important;max-width:none!important;margin:0!important}`;
+            document.head.appendChild(style);
+            const root = document.createDocumentFragment();
+            for (let start = 0; start < scaledSlices.length; start += composition) {
+              const items = scaledSlices.slice(start, start + composition);
+              const outputPage = document.createElement("section");
+              outputPage.className = "final-output-page";
+              if (composition === 1) {
+                const windowElement = document.createElement("div");
+                windowElement.className = "logical-window";
+                windowElement.style.left = "0";
+                windowElement.style.top = "0";
+                const clone = source.cloneNode(true);
+                clone.style.top = `${-items[0].offset}px`;
+                windowElement.appendChild(clone);
+                outputPage.appendChild(windowElement);
+              } else {
+                const grid = document.createElement("div");
+                grid.className = "final-grid";
+                items.forEach((slice, index) => {
+                  const tile = document.createElement("div");
+                  tile.className = "final-tile";
+                  const row = Math.floor(index / columns);
+                  const remaining = items.length - row * columns;
+                  if (columns === 2 && remaining === 1 && index === items.length - 1) {
+                    tile.style.gridColumn = "1 / 3";
+                  }
+                  if (columns === 1 && items.length === 1) {
+                    tile.style.gridRow = "1 / 3";
+                  }
+                  if (composition === 4 && items.length <= 2) {
+                    tile.style.gridRow = "1 / 3";
+                  }
+                  const logicalPaper = document.createElement("div");
+                  logicalPaper.className = "logical-paper";
+                  logicalPaper.style.left = `${(cellWidth - renderedWidth) / 2}px`;
+                  logicalPaper.style.top = `${(cellHeight - renderedHeight) / 2}px`;
+                  const windowElement = document.createElement("div");
+                  windowElement.className = "logical-window";
+                  const clone = source.cloneNode(true);
+                  clone.style.top = `${-slice.offset}px`;
+                  windowElement.appendChild(clone);
+                  logicalPaper.appendChild(windowElement);
+                  tile.appendChild(logicalPaper);
+                  grid.appendChild(tile);
+                });
+                outputPage.appendChild(grid);
+              }
+              root.appendChild(outputPage);
+            }
+            document.body.replaceChildren(root);
+            return { clientSourceHeight: sourceHeight, clientLogicalPages: slices.length, serverSourceHeight, heightScale, logicalPages: scaledSlices.length };
+          }, { slices, sourceHeight, composition, geometry, orientation });
+          console.info("[PDF] Final layout composed", layoutMetrics);
+          await page.evaluate(async () => {
+            await document.fonts.ready;
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          });
+        }
         await page.emulateMedia({ media: "print" });
         const pdf = await page.pdf({
           format: paperFormat,
