@@ -82,18 +82,6 @@ pnpm build
 
 The production application uses the native Next.js build defined in `vercel.json`. The existing Vinext/Cloudflare build remains available for local and legacy deployment verification.
 
-## Product gallery
-
-| Import and selection | WYSIWYG document preview |
-| --- | --- |
-| ![Q&A selection](public/project-gallery/05-qa-selection.jpg) | ![Light document preview](public/project-gallery/06-wysiwyg-preview-light.jpg) |
-| **PDF Export Studio** | **High-resolution PNG composition** |
-| ![PDF Export Studio](public/project-gallery/07-export-studio-pdf.jpg) | ![PNG 4-up export](public/project-gallery/08-export-studio-png-4up.jpg) |
-| **Dark document appearance** | **A3 landscape composition** |
-| ![Dark document preview](public/project-gallery/09-wysiwyg-preview-dark.jpg) | ![A3 landscape 2-up](public/project-gallery/10-a3-landscape-2up.jpg) |
-
-The complete set of 12 portfolio-ready images is stored in [`public/project-gallery`](public/project-gallery).
-
 ## Production deployment
 
 ### 1. Extractor on Render
