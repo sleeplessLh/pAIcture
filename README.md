@@ -19,6 +19,16 @@ pAIcture turns a public ChatGPT shared conversation into a selectable, paginated
 - Produces selectable-text Chromium PDFs and high-resolution PNG pages from the same canonical document renderer.
 - Keeps each visitor's conversation in their current browser session; there is no public conversation-history database.
 
+## English export gallery
+
+| Editorial conversation | Technical content |
+| --- | --- |
+| ![English conversation document](public/project-gallery-english/01-english-document-header.png) | ![English code and table export](public/project-gallery-english/03-english-code-and-table.png) |
+| **Generated-image presentation** | **Dark document appearance** |
+| ![Generated image inside an English answer](public/project-gallery-english/04-english-generated-image.png) | ![English dark document](public/project-gallery-english/05-english-dark-document.png) |
+
+The complete portfolio-ready English set is available in [`public/project-gallery-english`](public/project-gallery-english).
+
 ## Supported production workflow
 
 `ChatGPT share URL → structured extraction → Q&A selection → WYSIWYG pages → PDF / PNG`
