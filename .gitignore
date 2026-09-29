@@ -42,3 +42,6 @@ tmp/
 output/
 # Temporary checkout used only to publish the standalone plugin endpoint.
 plugin-site/deploy/
+
+.vercel
+.env*.local

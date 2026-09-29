@@ -76,20 +76,24 @@ The production application is served from the generated Sites/Cloudflare build. 
 3. Keep `ALLOWED_ORIGINS` restricted to the production pAIcture origin(s).
 4. Confirm `GET /health` returns `{ "ok": true }`.
 
-### 2. Application on Sites
+### 2. Application on Vercel
 
-Set the Sites project environment variables:
+The public production application is deployed at:
+
+- `https://paicture.vercel.app`
+
+Set these Vercel Production environment variables:
 
 - `CHATGPT_EXTRACTOR_URL=https://<render-service-host>`
 - `CHATGPT_EXTRACTOR_TOKEN=<the same secret>`
 
-Publish the repository through the configured Sites project in `.openai/hosting.json`. After deployment, verify a real public ChatGPT share import and both PDF and PNG downloads; a homepage-only smoke test is insufficient.
+Deploy with `vercel --prod` (or connect the existing GitHub repository for automatic deployments). `vercel.json` keeps the native Next.js build separate from the legacy Sites/Cloudflare build. After deployment, verify a real public ChatGPT share import and both PDF and PNG downloads; a homepage-only smoke test is insufficient.
 
 ## Redeployment checklist
 
 1. Run lint, tests, and the production build.
 2. Deploy the Render service and confirm `/health` plus one real import.
-3. Publish the Sites application with matching environment variables.
+3. Deploy the Vercel application with matching environment variables.
 4. Test Q&A selection, generated images, all page settings, PDF, PNG, and responsive layouts on the live URL.
 5. Tag the exact verified commit.
 
@@ -102,7 +106,7 @@ git show stable-pre-production
 git switch --detach stable-pre-production
 ```
 
-For a hosted rollback, redeploy the tagged commit to Render and Sites with the existing production secrets. Do not overwrite a working branch with `git reset --hard`; create a rollback branch from the tag instead:
+For a hosted rollback, redeploy the tagged commit to Render and Vercel with the existing production secrets. Do not overwrite a working branch with `git reset --hard`; create a rollback branch from the tag instead:
 
 ```bash
 git switch -c codex/rollback-stable-pre-production stable-pre-production
