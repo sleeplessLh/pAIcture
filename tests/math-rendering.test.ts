@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderMarkdown } from "../lib/conversation/adapters.ts";
 import { sanitizeForExportHtml } from "../lib/conversation/sanitize.ts";
@@ -30,4 +31,16 @@ test("preserves KaTeX MathML through the canonical export sanitizer", () => {
   assert.match(output, /<menclose notation="box">/);
   assert.match(output, /<annotation encoding="application\/x-tex">/);
   assert.doesNotMatch(output, /<script|<svg/i);
+});
+
+test("preserves CJK text inside MathML", () => {
+  const output = sanitizeForExportHtml(renderMarkdown("\\[Loss=-\\log(\\text{真实类别的概率})\\]"));
+  assert.match(output, /<mtext>真实类别的概率<\/mtext>/);
+  assert.match(output, /<math[^>]+display="block"/);
+});
+
+test("server export CSS provides embedded CJK fallbacks for code and MathML", () => {
+  const css = readFileSync(new URL("../lib/export-document-style.mjs", import.meta.url), "utf8");
+  assert.match(css, /code \{[^}]*Noto Sans SC Variable/);
+  assert.match(css, /\.katex-mathml mtext\{[^}]*Noto Sans SC Variable/);
 });

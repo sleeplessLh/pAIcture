@@ -3,7 +3,10 @@ import { adapters, parseChatGptShareHtml } from "../../../../lib/conversation/ad
 import type { ResolvedImageAssets } from "../../../../lib/conversation/types";
 
 const friendlyError = "Unable to import this shared conversation. Please make sure this is a valid ChatGPT shared conversation link and that it is still publicly accessible.";
+const temporaryError = "The import service is taking longer than expected. Please keep this page open and try again.";
 const privateResponseHeaders = { "Cache-Control": "private, no-store, max-age=0", Pragma: "no-cache" };
+
+export const maxDuration = 120;
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
@@ -47,6 +50,9 @@ export async function POST(request: Request) {
   } catch (error) {
     // Keep network/debug detail in server logs, never in the primary UI.
     console.error("ChatGPT shared-link import failed", error);
+    const message = error instanceof Error ? error.message : "";
+    const temporary = message.startsWith("EXTRACTOR_") || (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"));
+    if (temporary) return NextResponse.json({ error: temporaryError, code: "IMPORT_TEMPORARY_UNAVAILABLE" }, { status: 503, headers: { ...privateResponseHeaders, "Retry-After": "2" } });
     return NextResponse.json({ error: friendlyError }, { status: 422, headers: privateResponseHeaders });
   }
 }

@@ -22,6 +22,45 @@ const paperSizes: Record<PaperSize, { label: string; width: number; height: numb
   letter: { label: "Letter", width: 816, height: 1056, margin: 68 },
 };
 
+function normalizeShareUrl(value: string) {
+  return value.normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").trim();
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function requestConversation(value: string): Promise<Conversation> {
+  const body = JSON.stringify({ url: normalizeShareUrl(value) });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 105_000);
+    try {
+      const response = await fetch("/api/import/chatgpt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({})) as Conversation & { error?: string; code?: string };
+      if (response.ok) return payload as Conversation;
+      const retryable = response.status === 502 || response.status === 503 || response.status === 504 || payload.code === "IMPORT_TEMPORARY_UNAVAILABLE";
+      if (!retryable || attempt === 1) throw new Error(payload.error || "Unable to import this shared conversation.");
+      lastError = new Error(payload.error || "The import service is still waking up.");
+    } catch (reason) {
+      lastError = reason;
+      const isNetworkFailure = reason instanceof TypeError || (reason instanceof DOMException && reason.name === "AbortError");
+      if (!isNetworkFailure || attempt === 1) throw reason;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    await delay(1_500);
+  }
+  throw lastError instanceof Error ? lastError : new Error("Unable to import this shared conversation.");
+}
+
 function pageGeometry(config: ExportConfig) {
   const paper = paperSizes[config.paper];
   const rotated = config.orientation === "landscape";
@@ -30,8 +69,9 @@ function pageGeometry(config: ExportConfig) {
 
 function detectPlatform(value: string): Platform | null {
   try {
-    const host = new URL(value).hostname.replace(/^www\./, "");
-    if (host === "chatgpt.com" && /^\/share\/[a-z0-9-]+\/?$/i.test(new URL(value).pathname)) return "chatgpt";
+    const normalized = normalizeShareUrl(value);
+    const host = new URL(normalized).hostname.replace(/^www\./, "");
+    if (host === "chatgpt.com" && /^\/share\/[a-z0-9-]+\/?$/i.test(new URL(normalized).pathname)) return "chatgpt";
   } catch {}
   return null;
 }
@@ -275,11 +315,8 @@ export default function Home() {
     if (!detected) { setError("Paste a public ChatGPT shared link beginning with https://chatgpt.com/share/"); setStatus("error"); return; }
     setStatus("loading"); setError(""); setConversation(null); setSelectedExchangeIds([]); setImportStage("reading");
     try {
-      const response = await fetch("/api/import/chatgpt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url.trim() }) });
+      const imported = await requestConversation(url);
       setImportStage("organizing");
-      const payload = await response.json() as Conversation & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Unable to import this shared conversation.");
-      const imported = payload as Conversation;
       const importedExchanges = groupConversationExchanges(imported.messages);
       setImportStage("building");
       setConversation(imported);
@@ -290,7 +327,11 @@ export default function Home() {
       setUrl("");
       setImportStage("ready"); setStatus("ready");
       requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "We could not read this conversation."); setStatus("error"); }
+    } catch (reason) {
+      const networkFailure = reason instanceof TypeError || (reason instanceof DOMException && reason.name === "AbortError");
+      setError(networkFailure ? "The mobile connection was interrupted before the import finished. Keep this page open and try again on a stable network." : reason instanceof Error ? reason.message : "We could not read this conversation.");
+      setStatus("error");
+    }
   }
 
   async function exportDocument() {
