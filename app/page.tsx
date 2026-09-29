@@ -381,7 +381,7 @@ export default function Home() {
   }
 
   return <main className="workshop-app">
-    <header className="site-header"><a className="brand" href="#top" aria-label="pAIcture home"><span className="brand-mark">p</span><span>pAIcture</span></a><div className="header-meta"><span className="status-dot" /> Early workshop</div><button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}><Sun size={16} /><span className="toggle-track"><span className="toggle-thumb" /></span><Moon size={16} /></button></header>
+    <header className="site-header"><a className="brand" href="#top" aria-label="pAIcture home"><span className="brand-mark">p</span><span>pAIcture</span></a><button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}><Sun size={16} /><span className="toggle-track"><span className="toggle-thumb" /></span><Moon size={16} /></button></header>
     <section id="top" className="hero">
       <div className="hero-decor" aria-hidden="true"><ChatBubble3D className="hero-bubble" /><FloatingPage className="hero-page" /><Sparkle className="hero-sparkle-one" /><Sparkle className="hero-sparkle-two" /></div>
       <div className="eyebrow"><WandSparkles size={14} /> A little workshop for your conversations</div>

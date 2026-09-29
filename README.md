@@ -2,6 +2,23 @@
 
 pAIcture turns a public ChatGPT shared conversation into a selectable, paginated document and exports it as a vector PDF or high-resolution PNG pages.
 
+[![Live](https://img.shields.io/badge/live-paicture.vercel.app-ff7657?style=for-the-badge)](https://paicture.vercel.app)
+[![Next.js](https://img.shields.io/badge/Next.js-16-111111?style=for-the-badge&logo=nextdotjs)](https://nextjs.org/)
+[![License](https://img.shields.io/badge/license-MIT-6b78d6?style=for-the-badge)](LICENSE)
+
+**[Open the live app →](https://paicture.vercel.app)**
+
+![pAIcture — conversation to document](public/project-gallery/01-paicture-cover.png)
+
+## Highlights
+
+- Imports real public ChatGPT share links without requesting account credentials or cookies.
+- Groups the conversation into selectable Q&A exchanges and exports only what the user chooses.
+- Preserves Markdown, code, tables, math, Unicode, links, and supported generated images.
+- Provides a paginated WYSIWYG Export Studio with A4, A3, Letter, portrait, landscape, light/dark, and 1/2/4-up composition.
+- Produces selectable-text Chromium PDFs and high-resolution PNG pages from the same canonical document renderer.
+- Keeps each visitor's conversation in their current browser session; there is no public conversation-history database.
+
 ## Supported production workflow
 
 `ChatGPT share URL → structured extraction → Q&A selection → WYSIWYG pages → PDF / PNG`
@@ -10,7 +27,7 @@ Public ChatGPT `/share/...` links are supported. pAIcture does not request ChatG
 
 ## Architecture
 
-- **Application:** React 19 + Vinext/Next-compatible routes, deployed with OpenAI Sites on Cloudflare.
+- **Application:** React 19 + Next.js-compatible routes, deployed on Vercel.
 - **Retriever and PDF renderer:** Node.js 22 + Playwright Chromium, deployed as a private-token-protected Render web service.
 - **Import:** the application validates the ChatGPT URL, the retriever downloads the public page, and the application decodes ChatGPT's structured hydration payload.
 - **Images:** public generated-image assets are resolved during import and returned as stable data URLs for preview/export.
@@ -63,7 +80,19 @@ pnpm test
 pnpm build
 ```
 
-The production application is served from the generated Sites/Cloudflare build. `pnpm start` runs the generated Worker locally for production-like verification; it is not the public deployment command.
+The production application uses the native Next.js build defined in `vercel.json`. The existing Vinext/Cloudflare build remains available for local and legacy deployment verification.
+
+## Product gallery
+
+| Import and selection | WYSIWYG document preview |
+| --- | --- |
+| ![Q&A selection](public/project-gallery/05-qa-selection.jpg) | ![Light document preview](public/project-gallery/06-wysiwyg-preview-light.jpg) |
+| **PDF Export Studio** | **High-resolution PNG composition** |
+| ![PDF Export Studio](public/project-gallery/07-export-studio-pdf.jpg) | ![PNG 4-up export](public/project-gallery/08-export-studio-png-4up.jpg) |
+| **Dark document appearance** | **A3 landscape composition** |
+| ![Dark document preview](public/project-gallery/09-wysiwyg-preview-dark.jpg) | ![A3 landscape 2-up](public/project-gallery/10-a3-landscape-2up.jpg) |
+
+The complete set of 12 portfolio-ready images is stored in [`public/project-gallery`](public/project-gallery).
 
 ## Production deployment
 
