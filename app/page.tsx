@@ -93,6 +93,13 @@ function downloadBlob(blob: Blob, filename: string) {
   const link = document.createElement("a");
   link.href = href;
   link.download = filename;
+  // iOS Safari is more reliable when a generated file can also open in its
+  // document viewer, from which the native Share Sheet / Save to Files flow is
+  // available. Other browsers continue to use the normal download behavior.
+  if (/iP(?:hone|ad|od)|Macintosh(?=.*Mobile)/.test(navigator.userAgent)) {
+    link.target = "_blank";
+    link.rel = "noopener";
+  }
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
@@ -104,10 +111,10 @@ function exportFilename(title: string) {
   return title.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 80) || "paicture-chatgpt-export";
 }
 
-type LogicalPageRender = { canvas: HTMLCanvasElement; offset: number; end: number };
+type PageSlice = { offset: number; end: number };
+type LogicalPageRender = PageSlice & { canvas: HTMLCanvasElement };
 
-async function renderDocumentPages(source: HTMLElement, config: ExportConfig, captureScale: number): Promise<LogicalPageRender[]> {
-  const { default: html2canvas } = await import("html2canvas");
+async function measureDocumentPages(source: HTMLElement, config: ExportConfig): Promise<{ slices: PageSlice[]; totalHeight: number }> {
   const { width: pageWidth, height: pageHeight, margin } = pageGeometry(config);
   const printableWidth = pageWidth - margin * 2;
   const printableHeight = pageHeight - margin * 2;
@@ -130,16 +137,13 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
         if (previous && Math.abs(previous.top - rect.top) < 1.5) previous.bottom = Math.max(previous.bottom, rect.bottom);
         else lines.push({ top: rect.top, bottom: rect.bottom });
       }
-      return lines.slice(1).map((line, index) => {
-        const previous = lines[index];
-        return Math.round((previous.bottom + line.top) / 2 - sourceTop);
-      });
+      return lines.slice(1).map((line, index) => Math.round((lines[index].bottom + line.top) / 2 - sourceTop));
     });
   const safeBreaks = [...elementBreaks, ...lineBreaks].sort((a, b) => a - b);
   const protectedRanges = [...source.querySelectorAll(".conversation-message.user, pre, blockquote, table, .conversation-image, img")]
     .map((element) => { const rect = element.getBoundingClientRect(); return { top: Math.round(rect.top - sourceTop), bottom: Math.round(rect.bottom - sourceTop) }; })
     .filter((range) => range.bottom - range.top < printableHeight);
-  const pages: LogicalPageRender[] = [];
+  const slices: PageSlice[] = [];
   for (let offset = 0; offset < totalHeight;) {
     const idealEnd = Math.min(offset + printableHeight, totalHeight);
     const protectedAtEnd = protectedRanges.find((range) => range.top < idealEnd && range.bottom > idealEnd && range.top > offset + printableHeight * .3);
@@ -147,6 +151,21 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
     const earliestBreak = offset + Math.floor(printableHeight * .68);
     const safeEnd = safeBreaks.filter((position) => position >= earliestBreak && position <= targetEnd).at(-1);
     const end = idealEnd === totalHeight ? totalHeight : safeEnd || targetEnd;
+    slices.push({ offset, end });
+    offset = end;
+  }
+  return { slices, totalHeight };
+}
+
+async function renderDocumentPages(source: HTMLElement, config: ExportConfig, captureScale: number, onProgress?: (page: number, total: number) => void): Promise<LogicalPageRender[]> {
+  const { default: html2canvas } = await import("html2canvas");
+  const { width: pageWidth, height: pageHeight, margin } = pageGeometry(config);
+  const printableWidth = pageWidth - margin * 2;
+  const { slices, totalHeight } = await measureDocumentPages(source, config);
+  const pages: LogicalPageRender[] = [];
+  try {
+    for (const { offset, end } of slices) {
+    onProgress?.(pages.length + 1, slices.length);
     // Start continuation captures just past the midpoint break. html2canvas can
     // retain a sub-pixel antialiasing fringe from the preceding line otherwise.
     const captureOffset = offset === 0 ? 0 : Math.min(end - 1, offset + 2);
@@ -159,7 +178,7 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
     const paperColor = source.dataset.appearance === "dark" ? "#202225" : "#fbfaf7";
     context.fillStyle = paperColor;
     context.fillRect(0, 0, page.width, page.height);
-    const slice = await html2canvas(source, { scale: captureScale, backgroundColor: paperColor, useCORS: true, logging: false, x: 0, y: captureOffset, width: source.scrollWidth, height: sliceHeight, windowWidth: document.documentElement.scrollWidth, windowHeight: Math.max(document.documentElement.scrollHeight, totalHeight), scrollX: 0, scrollY: 0 });
+    const slice = await html2canvas(source, { scale: captureScale, backgroundColor: paperColor, useCORS: true, logging: false, x: 0, y: captureOffset, width: source.scrollWidth, height: sliceHeight, windowWidth: Math.max(1440, pageWidth), windowHeight: Math.max(1800, totalHeight), scrollX: 0, scrollY: 0 });
     context.drawImage(slice, 0, 0, slice.width, slice.height, margin * captureScale, margin * captureScale, printableWidth * captureScale, sliceHeight * captureScale);
     if (offset > 0) {
       context.fillStyle = paperColor;
@@ -173,12 +192,13 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
       context.textAlign = "right";
       context.fillText(String(pages.length + 1), (pageWidth - margin) * captureScale, (pageHeight - 24) * captureScale);
     }
-    pages.push({ canvas: page, offset, end });
-    offset = end;
+      pages.push({ canvas: page, offset, end });
+    }
+    return pages;
+  } finally {
+    source.classList.remove("export-capture");
+    source.style.removeProperty("--export-capture-width");
   }
-  source.classList.remove("export-capture");
-  source.style.removeProperty("--export-capture-width");
-  return pages;
 }
 
 function composePageCanvases(logicalPages: LogicalPageRender[], perImage: PageComposition, config: ExportConfig) {
@@ -273,6 +293,7 @@ export default function Home() {
   const [previewFit, setPreviewFit] = useState<"page" | "width">("width");
   const [exporting, setExporting] = useState(false);
   const [exportPhase, setExportPhase] = useState<"idle" | "rendering" | "downloading" | "done" | "error">("idle");
+  const [exportDetail, setExportDetail] = useState("");
   const [exportError, setExportError] = useState("");
   const previewRef = useRef<HTMLDivElement>(null);
   const exportConfig = useMemo<ExportConfig>(() => ({ paper, orientation, composition }), [paper, orientation, composition]);
@@ -342,6 +363,7 @@ export default function Home() {
     }
     setExporting(true);
     setExportPhase("rendering");
+    setExportDetail("Preparing document…");
     setExportError("");
     console.info("[EXPORT] Download clicked", { format });
     try {
@@ -354,11 +376,14 @@ export default function Home() {
       await waitForDocumentReady(source);
       console.info("[EXPORT] Render ready");
       if (format === "pdf") {
-        const logicalPages = await renderDocumentPages(source, exportConfig, 1);
+        setExportDetail("Paginating…");
+        const { slices, totalHeight } = await measureDocumentPages(source, exportConfig);
+        const exportHtml = source.outerHTML;
+        setExportDetail("Creating PDF…");
         const response = await fetch("/api/export/pdf", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html: source.outerHTML, config: { ...exportConfig, sourceHeight: logicalPages.at(-1)?.end, slices: logicalPages.map(({ offset, end }) => ({ offset, end })) } }),
+          body: JSON.stringify({ html: exportHtml, config: { ...exportConfig, sourceHeight: totalHeight, slices } }),
         });
         if (!response.ok) {
           const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -368,13 +393,15 @@ export default function Home() {
         if (!blob.size || !blob.type.includes("pdf")) throw new Error("The PDF service returned an invalid file.");
         console.info("[EXPORT] PDF Blob generated", { size: blob.size, type: blob.type });
         setExportPhase("downloading");
+        setExportDetail("Sending to downloads…");
         downloadBlob(blob, `${slug}.pdf`);
         setExportPhase("done");
+        setExportDetail("Ready");
         console.info("[EXPORT] Download triggered", { filename: `${slug}.pdf` });
         return;
       }
       const captureScale = 2;
-      const logicalPages = await renderDocumentPages(source, exportConfig, captureScale);
+      const logicalPages = await renderDocumentPages(source, exportConfig, captureScale, (page, total) => setExportDetail(`Rendering page ${page} of ${total}…`));
       const outputs = composePageCanvases(logicalPages, composition, exportConfig);
       const maxBytes = Math.max(...outputs.map((page) => page.width * page.height * 4));
       if (maxBytes > 420_000_000) throw new Error("This page composition would exceed the browser's safe image memory limit. Choose fewer pages per image or a smaller paper size.");
@@ -386,6 +413,7 @@ export default function Home() {
         pngFiles[`${slug}-${String(page + 1).padStart(3, "0")}.png`] = new Uint8Array(await blob.arrayBuffer());
       }
       setExportPhase("downloading");
+      setExportDetail("Sending to downloads…");
       if (outputs.length === 1) {
         const file = pngFiles[Object.keys(pngFiles)[0]];
         const bytes = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer;
@@ -396,12 +424,14 @@ export default function Home() {
         downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${slug}-images.zip`);
       }
       setExportPhase("done");
+      setExportDetail("Ready");
       console.info("[EXPORT] Download triggered", { pages: logicalPages.length, files: outputs.length });
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "The export could not be generated.";
       console.error("[EXPORT] Failed", reason);
       setExportError(message);
       setExportPhase("error");
+      setExportDetail("");
     } finally {
       previewRef.current?.classList.remove("export-capture");
       previewRef.current?.style.removeProperty("--export-capture-width");
@@ -467,8 +497,8 @@ export default function Home() {
               <p className="quality-note"><Check size={13} /> High quality · balanced 1:1 margins</p>
             </div>
           </details>
-          <button type="button" className="export-button" onClick={exportDocument} disabled={exporting || !selectedMessages.length}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? exportPhase === "downloading" ? "Sending to downloads…" : `Building ${format === "pdf" ? "your PDF" : "your images"}…` : exportPhase === "done" ? `Download ${format === "pdf" ? "PDF" : "again"}` : `Create ${format === "pdf" ? "PDF" : "PNG images"}`}</button>
-          {exporting && <ProgressJourney stage={exportPhase === "downloading" ? "ready" : "building"} />}{exportError && <p className="export-error" role="alert">{exportError}</p>}<p className="export-status" aria-live="polite">{exportPhase === "done" ? "Your browser download has started." : exporting ? "Keep this tab open while the pages are prepared." : !selectedMessages.length ? "Select content above to enable export." : ""}</p><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p>
+          <button type="button" className="export-button" onClick={exportDocument} disabled={exporting || previewRendering || !selectedMessages.length}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? exportDetail || `Building ${format === "pdf" ? "your PDF" : "your images"}…` : exportPhase === "done" ? `Download ${format === "pdf" ? "PDF" : "again"}` : previewRendering ? "Preparing preview…" : `Create ${format === "pdf" ? "PDF" : "PNG images"}`}</button>
+          {exporting && <ProgressJourney stage={exportPhase === "downloading" ? "ready" : "building"} />}{exportError && <p className="export-error" role="alert">{exportError}</p>}<p className="export-status" aria-live="polite">{exportPhase === "done" ? "Your browser download has started." : exporting ? exportDetail || "Keep this tab open while the pages are prepared." : !selectedMessages.length ? "Select content above to enable export." : ""}</p><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p>
         </aside>
       </div></section>
       : <section className="process"><div className="process-intro"><span className="section-index">The tiny document workshop</span><h2>From a chat to something you can keep.</h2></div><div className="process-grid"><article><span className="process-visual"><ChatBubble3D /></span><b>01</b><h3>Share it</h3><p>Create a public link for your ChatGPT conversation.</p></article><article><span className="process-visual"><FloatingPage /></span><b>02</b><h3>Arrange it</h3><p>Choose the questions and answers you want to keep.</p></article><article><span className="process-visual"><DocumentStack compact /></span><b>03</b><h3>Take it with you</h3><p>Download a polished PDF or crisp image pages.</p></article></div></section>}
