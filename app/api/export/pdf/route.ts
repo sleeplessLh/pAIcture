@@ -4,7 +4,17 @@ const privateResponseHeaders = { "Cache-Control": "private, no-store, max-age=0"
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { html?: unknown; config?: { paper?: unknown; orientation?: unknown; composition?: unknown; slices?: unknown; sourceHeight?: unknown } };
+    const contentType = request.headers.get("content-type") || "";
+    let body: { html?: unknown; config?: { paper?: unknown; orientation?: unknown; composition?: unknown; slices?: unknown; sourceHeight?: unknown }; filename?: unknown };
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      const configText = form.get("config");
+      body = {
+        html: form.get("html"),
+        config: typeof configText === "string" ? JSON.parse(configText) : undefined,
+        filename: form.get("filename"),
+      };
+    } else body = await request.json();
     if (typeof body.html !== "string" || body.html.length > 7_500_000) {
       return NextResponse.json({ error: "Invalid export document." }, { status: 400, headers: privateResponseHeaders });
     }
@@ -21,9 +31,16 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(120_000),
     });
     if (!upstream.ok) throw new Error(`PDF_RENDERER_${upstream.status}`);
+    const filename = typeof body.filename === "string"
+      ? body.filename.normalize("NFKC").replace(/[^a-z0-9._-]+/gi, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 100)
+      : "paicture-chatgpt-export.pdf";
     return new Response(await upstream.arrayBuffer(), {
       status: 200,
-      headers: { "Content-Type": "application/pdf", ...privateResponseHeaders },
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${filename || "paicture-chatgpt-export.pdf"}"`,
+        ...privateResponseHeaders,
+      },
     });
   } catch (error) {
     console.error("PDF export failed", error);

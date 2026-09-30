@@ -6,6 +6,7 @@ const pageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "ut
 const appCss = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 const exportCss = readFileSync(new URL("../lib/export-document-style.mjs", import.meta.url), "utf8");
 const importRoute = readFileSync(new URL("../app/api/import/chatgpt/route.ts", import.meta.url), "utf8");
+const exportRoute = readFileSync(new URL("../app/api/export/pdf/route.ts", import.meta.url), "utf8");
 const extractorSource = readFileSync(new URL("../server/extractor.mjs", import.meta.url), "utf8");
 
 test("PDF pagination uses measurement without invoking the raster renderer", () => {
@@ -37,6 +38,20 @@ test("image-heavy imports resolve assets concurrently within cold-start timeouts
 test("iOS receives the completed file without suspending export in a blank tab", () => {
   assert.match(pageSource, /if \(isIosBrowser\(\)\) \{\s*window\.location\.assign\(href\)/);
   assert.doesNotMatch(pageSource, /window\.open\(/);
+});
+
+test("mobile PDF uses a native form navigation instead of an asynchronous Blob download", () => {
+  assert.match(pageSource, /form\.enctype = "multipart\/form-data"/);
+  assert.match(pageSource, /if \(isMobileBrowser\(\)\)/);
+  assert.match(pageSource, /submitPdfToNativeViewer\(exportHtml, pdfConfig/);
+  assert.match(exportRoute, /request\.formData\(\)/);
+  assert.match(exportRoute, /Content-Disposition/);
+});
+
+test("preview initially shows three pages and provides an explicit expand-collapse control", () => {
+  assert.match(pageSource, /previewPages\.slice\(0, 3\)/);
+  assert.match(pageSource, /Expand all \$\{previewPages\.length\} pages/);
+  assert.match(pageSource, /Collapse to first 3 pages/);
 });
 
 test("1-in-1 PDF uses native print pagination without cloning the whole document per page", () => {

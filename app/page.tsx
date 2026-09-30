@@ -94,6 +94,31 @@ function isIosBrowser() {
   return /iP(?:hone|ad|od)|Macintosh(?=.*Mobile)/.test(navigator.userAgent);
 }
 
+function isMobileBrowser() {
+  return isIosBrowser() || /Android|Mobi/i.test(navigator.userAgent);
+}
+
+function submitPdfToNativeViewer(html: string, config: ExportConfig & { sourceHeight: number; slices: PageSlice[] }, filename: string) {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = "/api/export/pdf";
+  form.enctype = "multipart/form-data";
+  form.target = "_self";
+  form.style.display = "none";
+  const addField = (name: string, value: string) => {
+    const field = document.createElement("textarea");
+    field.name = name;
+    field.value = value;
+    form.appendChild(field);
+  };
+  addField("html", html);
+  addField("config", JSON.stringify(config));
+  addField("filename", filename);
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const href = URL.createObjectURL(blob);
   // Opening an about:blank tab before an asynchronous export suspends the
@@ -349,6 +374,7 @@ export default function Home() {
   const [orientation, setOrientation] = useState<Orientation>("portrait");
   const [composition, setComposition] = useState<PageComposition>(1);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [previewRendering, setPreviewRendering] = useState(false);
   const [previewFit, setPreviewFit] = useState<"page" | "width">("width");
   const [exporting, setExporting] = useState(false);
@@ -380,6 +406,7 @@ export default function Home() {
     const timer = window.setTimeout(async () => {
       setPreviewRendering(true);
       setPreviewPages([]);
+      setPreviewExpanded(false);
       try {
         // Preview pixels are display-only. A lower fixed scale keeps every page
         // affordable on iOS without changing document geometry or pagination.
@@ -450,12 +477,19 @@ export default function Home() {
           throw new Error("This image-heavy conversation is too large for one mobile PDF request. Select fewer exchanges and try again.");
         }
         setExportDetail("Creating PDF…");
+        const pdfConfig = { ...exportConfig, sourceHeight: totalHeight, slices };
+        if (isMobileBrowser()) {
+          setExportPhase("downloading");
+          setExportDetail("Opening PDF…");
+          submitPdfToNativeViewer(exportHtml, pdfConfig, `${slug}.pdf`);
+          return;
+        }
         const pdfController = new AbortController();
         const pdfTimeout = window.setTimeout(() => pdfController.abort(), 125_000);
         const response = await fetch("/api/export/pdf", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html: exportHtml, config: { ...exportConfig, sourceHeight: totalHeight, slices } }),
+          body: JSON.stringify({ html: exportHtml, config: pdfConfig, filename: `${slug}.pdf` }),
           signal: pdfController.signal,
         }).finally(() => window.clearTimeout(pdfTimeout));
         if (!response.ok) {
@@ -557,7 +591,7 @@ export default function Home() {
           {selectedMessages.length ? <>
             <div className="export-source-host" aria-hidden="true"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={selectedMessages} dateLabel={documentDate} appearance={documentAppearance} /></div>
             <div className={`page-preview-stage fit-${previewFit}`}>
-              {previewRendering ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the final pages…</strong></div> : <div className="page-preview-list">{previewPages.map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>{format === "pdf" ? "Output page" : "Image"} {index + 1}</figcaption><img src={src} alt={`Final ${format === "pdf" ? "PDF page" : "PNG image"} ${index + 1}`} /></figure>)}</div>}
+              {previewRendering ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the final pages…</strong></div> : <><div className="page-preview-list">{(previewExpanded ? previewPages : previewPages.slice(0, 3)).map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>{format === "pdf" ? "Output page" : "Image"} {index + 1}</figcaption><img src={src} alt={`Final ${format === "pdf" ? "PDF page" : "PNG image"} ${index + 1}`} /></figure>)}</div>{previewPages.length > 3 ? <button type="button" className="preview-page-toggle" aria-expanded={previewExpanded} onClick={() => setPreviewExpanded((expanded) => !expanded)}>{previewExpanded ? "Collapse to first 3 pages" : `Expand all ${previewPages.length} pages`}</button> : null}</>}
             </div>
           </> : <div className="empty-preview"><EmptyDocumentVisual /><strong>Your conversation will appear here.</strong><span>Select at least one Q&amp;A exchange to build the preview.</span></div>}
         </div>
