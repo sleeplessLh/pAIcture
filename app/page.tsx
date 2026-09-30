@@ -120,6 +120,58 @@ function exportFilename(title: string) {
   return title.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 80) || "paicture-chatgpt-export";
 }
 
+async function compressImageForPdf(src: string, targetCharacters: number) {
+  if (!src.startsWith("data:image/") || src.length <= targetCharacters) return src;
+  const image = new Image();
+  image.src = src;
+  await image.decode().catch(() => undefined);
+  if (!image.naturalWidth || !image.naturalHeight) return src;
+
+  let width = image.naturalWidth;
+  let height = image.naturalHeight;
+  const longestSide = Math.max(width, height);
+  if (longestSide > 1800) {
+    const ratio = 1800 / longestSide;
+    width = Math.max(1, Math.round(width * ratio));
+    height = Math.max(1, Math.round(height * ratio));
+  }
+  const canvas = document.createElement("canvas");
+  let quality = .86;
+  let result = src;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) break;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    result = canvas.toDataURL("image/webp", quality);
+    if (result.length <= targetCharacters) break;
+    width = Math.max(480, Math.round(width * .78));
+    height = Math.max(480, Math.round(height * .78));
+    quality = Math.max(.58, quality - .06);
+  }
+  canvas.width = 1;
+  canvas.height = 1;
+  return result.length < src.length ? result : src;
+}
+
+async function preparePdfHtml(source: HTMLElement) {
+  const clone = source.cloneNode(true) as HTMLElement;
+  const images = [...clone.querySelectorAll<HTMLImageElement>('img[src^="data:image/"]')];
+  if (!images.length) return clone.outerHTML;
+  // Vercel rejects request bodies above roughly 4.5 MB before the request can
+  // reach our PDF service. Compress only this private transport copy; preview
+  // and PNG continue to use the original full-resolution image assets.
+  const imageBudget = 2_700_000;
+  const perImageBudget = Math.max(64_000, Math.floor(imageBudget / images.length));
+  await Promise.all(images.map(async (image) => {
+    image.src = await compressImageForPdf(image.src, perImageBudget);
+  }));
+  return clone.outerHTML;
+}
+
 type PageSlice = { offset: number; end: number };
 type LogicalPageRender = PageSlice & { canvas: HTMLCanvasElement };
 
@@ -328,11 +380,17 @@ export default function Home() {
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setPreviewRendering(true);
+      setPreviewPages([]);
       try {
-        const logicalPages = await renderDocumentPages(previewRef.current!, exportConfig, 1);
+        // Preview pixels are display-only. A lower fixed scale keeps every page
+        // affordable on iOS without changing document geometry or pagination.
+        const logicalPages = await renderDocumentPages(previewRef.current!, exportConfig, .65);
         const finalPages = composePageCanvases(logicalPages, composition, exportConfig);
         if (cancelled) return;
-        setPreviewPages(finalPages.map((page) => page.toDataURL("image/png")));
+        const previews = finalPages.map((page) => page.toDataURL("image/jpeg", .82));
+        logicalPages.forEach(({ canvas }) => { canvas.width = 1; canvas.height = 1; });
+        finalPages.forEach((canvas) => { canvas.width = 1; canvas.height = 1; });
+        setPreviewPages(previews);
       } catch (reason) {
         console.error("[PREVIEW] Page rendering failed", reason);
       } finally { if (!cancelled) setPreviewRendering(false); }
@@ -395,7 +453,11 @@ export default function Home() {
       if (format === "pdf") {
         setExportDetail("Paginating…");
         const { slices, totalHeight } = await measureDocumentPages(source, exportConfig);
-        const exportHtml = source.outerHTML;
+        setExportDetail("Optimizing images for PDF…");
+        const exportHtml = await preparePdfHtml(source);
+        if (exportHtml.length > 3_600_000) {
+          throw new Error("This image-heavy conversation is too large for one mobile PDF request. Select fewer exchanges and try again.");
+        }
         setExportDetail("Creating PDF…");
         const response = await fetch("/api/export/pdf", {
           method: "POST",
@@ -404,7 +466,10 @@ export default function Home() {
         });
         if (!response.ok) {
           const payload = await response.json().catch(() => null) as { error?: string } | null;
-          throw new Error(payload?.error || "Unable to generate this PDF right now.");
+          const message = response.status === 413
+            ? "This image-heavy conversation exceeded the PDF transfer limit. Select fewer exchanges and try again."
+            : payload?.error || "Unable to generate this PDF right now.";
+          throw new Error(message);
         }
         const blob = await response.blob();
         if (!blob.size || !blob.type.includes("pdf")) throw new Error("The PDF service returned an invalid file.");

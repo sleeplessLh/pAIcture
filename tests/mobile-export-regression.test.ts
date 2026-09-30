@@ -9,7 +9,20 @@ const exportCss = readFileSync(new URL("../lib/export-document-style.mjs", impor
 test("PDF pagination uses measurement without invoking the raster renderer", () => {
   const pdfBranch = pageSource.slice(pageSource.indexOf('if (format === "pdf")'), pageSource.indexOf("const captureScale = 2"));
   assert.match(pdfBranch, /measureDocumentPages\(source, exportConfig\)/);
+  assert.match(pdfBranch, /preparePdfHtml\(source\)/);
+  assert.match(pdfBranch, /exportHtml\.length > 3_600_000/);
   assert.doesNotMatch(pdfBranch, /renderDocumentPages|html2canvas/);
+});
+
+test("image-heavy PDF transport is compressed before crossing the Vercel body limit", () => {
+  assert.match(pageSource, /const imageBudget = 2_700_000/);
+  assert.match(pageSource, /compressImageForPdf\(image\.src, perImageBudget\)/);
+  assert.match(pageSource, /response\.status === 413/);
+});
+
+test("mobile preview uses a fixed low-memory raster scale and releases canvases", () => {
+  assert.match(pageSource, /renderDocumentPages\(previewRef\.current!, exportConfig, \.65\)/);
+  assert.match(pageSource, /canvas\.width = 1; canvas\.height = 1/);
 });
 
 test("mobile capture keeps deterministic desktop document geometry", () => {
