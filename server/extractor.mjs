@@ -110,14 +110,27 @@ function sharedAssetPointers(html) {
   return [...new Set(html.match(/sediment:\/\/file_[a-z0-9_-]+(?:\?shared_conversation_id=[a-z0-9-]+)?/gi) || [])];
 }
 
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function run() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
+  return results;
+}
+
 async function resolveSharedImages(target, html, cookieHeader = "") {
   const pointers = sharedAssetPointers(html);
   if (!pointers.length) return { assets: {}, warnings: [] };
   console.info("[IMAGE] Shared image assets detected", { count: pointers.length });
   const directAssets = {};
-  for (const pointer of pointers) {
+  const directlyResolved = await mapWithConcurrency(pointers, 4, async (pointer) => {
     const fileId = pointer.match(/sediment:\/\/([^?]+)/i)?.[1];
-    if (!fileId) continue;
+    if (!fileId) return null;
     try {
       const sharedId = target.pathname.split("/").filter(Boolean).at(-1);
       const endpoint = new URL(`/backend-anon/files/download/${encodeURIComponent(fileId)}`, target);
@@ -130,21 +143,22 @@ async function resolveSharedImages(target, html, cookieHeader = "") {
         headers: { ...headers, Cookie: cookieHeader, Referer: target.toString() },
         signal: AbortSignal.timeout(20_000),
       });
-      if (!metadataResponse.ok) continue;
+      if (!metadataResponse.ok) return null;
       const metadata = await metadataResponse.json();
-      if (typeof metadata.download_url !== "string") continue;
+      if (typeof metadata.download_url !== "string") return null;
       const downloadUrl = new URL(metadata.download_url);
-      if (downloadUrl.protocol !== "https:" || !downloadUrl.hostname.endsWith(".oaiusercontent.com")) continue;
+      if (downloadUrl.protocol !== "https:" || !downloadUrl.hostname.endsWith(".oaiusercontent.com")) return null;
       const imageResponse = await fetch(downloadUrl, { signal: AbortSignal.timeout(25_000) });
       const mimeType = (imageResponse.headers.get("content-type") || "").split(";")[0].toLowerCase();
-      if (!imageResponse.ok || !mimeType.startsWith("image/")) continue;
+      if (!imageResponse.ok || !mimeType.startsWith("image/")) return null;
       const image = Buffer.from(await imageResponse.arrayBuffer());
-      directAssets[pointer] = {
+      return [pointer, {
         src: `data:${mimeType};base64,${image.toString("base64")}`,
         alt: "ChatGPT generated image",
-      };
-    } catch {}
-  }
+      }];
+    } catch { return null; }
+  });
+  for (const entry of directlyResolved) if (entry) directAssets[entry[0]] = entry[1];
   console.info("[IMAGE] Anonymous assets resolved", { resolved: Object.keys(directAssets).length });
   if (Object.keys(directAssets).length === pointers.length) {
     return { assets: directAssets, warnings: [] };
@@ -197,13 +211,13 @@ async function resolveSharedImages(target, html, cookieHeader = "") {
     });
     const resolved = { ...directAssets };
     const fetchedImageSources = new Set();
-    for (const renderedImage of renderedImages) {
+    const fetchedRenderedImages = await mapWithConcurrency(renderedImages, 4, async (renderedImage) => {
       try {
-        if (!isTrustedImageUrl(renderedImage.src)) continue;
+        if (!isTrustedImageUrl(renderedImage.src)) return null;
         const captured = capturedImageResponses.get(renderedImage.src);
         const imageResponse = captured ? null : await page.request.get(renderedImage.src, { timeout: 25_000 });
         const mimeType = captured?.contentType || (imageResponse?.headers()["content-type"] || "").split(";")[0].toLowerCase();
-        if (!captured && (!imageResponse?.ok() || !mimeType.startsWith("image/"))) continue;
+        if (!captured && (!imageResponse?.ok() || !mimeType.startsWith("image/"))) return null;
         const image = captured?.body || await imageResponse.body();
         const asset = {
           src: `data:${mimeType};base64,${image.toString("base64")}`,
@@ -211,9 +225,12 @@ async function resolveSharedImages(target, html, cookieHeader = "") {
           width: renderedImage.width,
           height: renderedImage.height,
         };
-        resolved[`image-title:${renderedImage.alt.replace(/^Generated image:\s*/i, "").trim().toLowerCase()}`] = asset;
-        fetchedImageSources.add(renderedImage.src);
-      } catch {}
+        return { key: `image-title:${renderedImage.alt.replace(/^Generated image:\s*/i, "").trim().toLowerCase()}`, source: renderedImage.src, asset };
+      } catch { return null; }
+    });
+    for (const item of fetchedRenderedImages) if (item) {
+      resolved[item.key] = item.asset;
+      fetchedImageSources.add(item.source);
     }
     console.info("[IMAGE] Rendered assets resolved", {
       candidates: renderedImages.length,
@@ -221,10 +238,10 @@ async function resolveSharedImages(target, html, cookieHeader = "") {
       resolved: fetchedImageSources.size,
     });
     const sharedId = target.pathname.split("/").filter(Boolean).at(-1);
-    for (let index = 0; index < pointers.length; index++) {
-      const pointer = pointers[index];
+    const recoveredPointers = await mapWithConcurrency(pointers, 4, async (pointer, index) => {
+      if (resolved[pointer]) return null;
       const fileId = pointer.match(/sediment:\/\/([^?]+)/i)?.[1];
-      if (!fileId) continue;
+      if (!fileId) return null;
       const query = new URLSearchParams({ shared_conversation_id: sharedId }).toString();
       const candidates = [
         new URL(`/backend-api/files/${encodeURIComponent(fileId)}/download?${query}`, target).toString(),
@@ -236,16 +253,17 @@ async function resolveSharedImages(target, html, cookieHeader = "") {
           const mimeType = (imageResponse.headers()["content-type"] || "").split(";")[0].toLowerCase();
           if (!imageResponse.ok() || !mimeType.startsWith("image/")) continue;
           const image = await imageResponse.body();
-          resolved[pointer] = {
+          return [pointer, {
             src: `data:${mimeType};base64,${image.toString("base64")}`,
             alt: renderedImages[index]?.alt || "ChatGPT generated image",
             width: renderedImages[index]?.width,
             height: renderedImages[index]?.height,
-          };
-          break;
+          }];
         } catch {}
       }
-    }
+      return null;
+    });
+    for (const entry of recoveredPointers) if (entry) resolved[entry[0]] = entry[1];
     const pointerAssets = pointers.filter((pointer) => resolved[pointer]).length;
     const recoveredAssets = Math.min(pointers.length, pointerAssets + fetchedImageSources.size);
     const failures = pointers.slice(recoveredAssets);
