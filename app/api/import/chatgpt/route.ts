@@ -29,7 +29,9 @@ export async function POST(request: Request) {
           ...(process.env.CHATGPT_EXTRACTOR_TOKEN ? { Authorization: `Bearer ${process.env.CHATGPT_EXTRACTOR_TOKEN}` } : {}),
         },
         body: JSON.stringify({ url: url.toString() }),
-        signal: AbortSignal.timeout(90_000),
+        // Leave a small buffer below the 120-second function ceiling while
+        // allowing for a Render cold start plus concurrent image retrieval.
+        signal: AbortSignal.timeout(112_000),
       });
       if (!response.ok) throw new Error(`EXTRACTOR_${response.status}`);
       const payload = await response.json() as { html?: unknown; assets?: unknown; assetWarnings?: unknown };

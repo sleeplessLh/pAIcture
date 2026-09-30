@@ -35,7 +35,9 @@ async function requestConversation(value: string): Promise<Conversation> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 105_000);
+    // A sleeping free extractor can spend roughly 50 seconds waking before it
+    // begins retrieval. Keep the browser alive beyond the server-side window.
+    const timeout = window.setTimeout(() => controller.abort(), 125_000);
     try {
       const response = await fetch("/api/import/chatgpt", {
         method: "POST",
