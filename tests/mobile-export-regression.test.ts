@@ -34,6 +34,11 @@ test("image-heavy imports resolve assets concurrently within cold-start timeouts
   assert.match(pageSource, /controller\.abort\(\), 125_000/);
 });
 
+test("iOS receives the completed file without suspending export in a blank tab", () => {
+  assert.match(pageSource, /if \(isIosBrowser\(\)\) \{\s*window\.location\.assign\(href\)/);
+  assert.doesNotMatch(pageSource, /window\.open\(/);
+});
+
 test("mobile capture keeps deterministic desktop document geometry", () => {
   assert.match(pageSource, /windowWidth: Math\.max\(1440, pageWidth\)/);
   assert.match(appCss, /\.conversation-document\.export-capture \.conversation-document-meta\{grid-template-columns:1fr auto auto/);

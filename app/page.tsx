@@ -94,23 +94,20 @@ function isIosBrowser() {
   return /iP(?:hone|ad|od)|Macintosh(?=.*Mobile)/.test(navigator.userAgent);
 }
 
-function downloadBlob(blob: Blob, filename: string, preparedViewer?: Window | null) {
+function downloadBlob(blob: Blob, filename: string) {
   const href = URL.createObjectURL(blob);
-  if (preparedViewer && !preparedViewer.closed) {
-    preparedViewer.location.href = href;
-    window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  // Opening an about:blank tab before an asynchronous export suspends the
+  // originating page on iOS, so the export never finishes. Navigate the active
+  // tab only after the file is ready; Safari's PDF/image viewer then exposes
+  // the native Share Sheet and Save to Files actions.
+  if (isIosBrowser()) {
+    window.location.assign(href);
+    window.setTimeout(() => URL.revokeObjectURL(href), 300_000);
     return;
   }
   const link = document.createElement("a");
   link.href = href;
   link.download = filename;
-  // iOS Safari is more reliable when a generated file can also open in its
-  // document viewer, from which the native Share Sheet / Save to Files flow is
-  // available. Other browsers continue to use the normal download behavior.
-  if (isIosBrowser()) {
-    link.target = "_blank";
-    link.rel = "noopener";
-  }
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
@@ -434,14 +431,6 @@ export default function Home() {
     setExportPhase("rendering");
     setExportDetail("Preparing document…");
     setExportError("");
-    // Safari frequently blocks a Blob navigation created only after a long
-    // asynchronous render. Reserve the viewer synchronously from the user's
-    // click, then navigate it to the finished file.
-    const iosViewer = isIosBrowser() ? window.open("about:blank", "_blank") : null;
-    if (iosViewer) {
-      iosViewer.document.title = "Preparing pAIcture export";
-      iosViewer.document.body.textContent = "Preparing your document…";
-    }
     console.info("[EXPORT] Download clicked", { format });
     try {
       const slug = exportFilename(conversation.title);
@@ -478,7 +467,7 @@ export default function Home() {
         console.info("[EXPORT] PDF Blob generated", { size: blob.size, type: blob.type });
         setExportPhase("downloading");
         setExportDetail("Sending to downloads…");
-        downloadBlob(blob, `${slug}.pdf`, iosViewer);
+        downloadBlob(blob, `${slug}.pdf`);
         setExportPhase("done");
         setExportDetail("Ready");
         console.info("[EXPORT] Download triggered", { filename: `${slug}.pdf` });
@@ -501,11 +490,11 @@ export default function Home() {
       if (outputs.length === 1) {
         const file = pngFiles[Object.keys(pngFiles)[0]];
         const bytes = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer;
-        downloadBlob(new Blob([bytes], { type: "image/png" }), `${slug}.png`, iosViewer);
+        downloadBlob(new Blob([bytes], { type: "image/png" }), `${slug}.png`);
       } else {
         const { zipSync } = await import("fflate");
         const archive = zipSync(pngFiles, { level: 6 });
-        downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${slug}-images.zip`, iosViewer);
+        downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${slug}-images.zip`);
       }
       setExportPhase("done");
       setExportDetail("Ready");
@@ -513,7 +502,6 @@ export default function Home() {
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "The export could not be generated.";
       console.error("[EXPORT] Failed", reason);
-      iosViewer?.close();
       setExportError(message);
       setExportPhase("error");
       setExportDetail("");
