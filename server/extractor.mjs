@@ -329,7 +329,11 @@ createServer(async (request, response) => {
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           document.documentElement.dataset.exportReady = "true";
         });
-        if (slices.length) {
+        // 1-in-1 can use Chromium's native fragmentation directly. Building a
+        // separate clone of the complete conversation for every logical page
+        // multiplied a 24-page image-heavy document into hundreds of DOM/image
+        // instances and made page.pdf() take roughly 96 seconds on mobile jobs.
+        if (slices.length && composition > 1) {
           const layoutMetrics = await page.evaluate(({ slices, sourceHeight, composition, geometry, orientation }) => {
             const source = document.querySelector(".conversation-document");
             if (!(source instanceof HTMLElement)) throw new Error("EXPORT_DOCUMENT_NOT_FOUND");
@@ -438,8 +442,9 @@ createServer(async (request, response) => {
             await document.fonts.ready;
             await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           });
-        }
+        } else console.info("[PDF] Native 1-in-1 pagination", { clientLogicalPages: slices.length });
         await page.emulateMedia({ media: "print" });
+        const pdfStartedAt = Date.now();
         const pdf = await page.pdf({
           format: paperFormat,
           landscape: orientation === "landscape",
@@ -459,7 +464,7 @@ createServer(async (request, response) => {
           "Cache-Control": "no-store",
         });
         response.end(pdf);
-        console.info("[PDF] Vector export complete", { bytes: pdf.length });
+        console.info("[PDF] Vector export complete", { bytes: pdf.length, elapsedMs: Date.now() - pdfStartedAt });
         return;
       } finally {
         await browser.close();

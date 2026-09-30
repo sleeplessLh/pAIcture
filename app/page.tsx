@@ -450,11 +450,14 @@ export default function Home() {
           throw new Error("This image-heavy conversation is too large for one mobile PDF request. Select fewer exchanges and try again.");
         }
         setExportDetail("Creating PDF…");
+        const pdfController = new AbortController();
+        const pdfTimeout = window.setTimeout(() => pdfController.abort(), 125_000);
         const response = await fetch("/api/export/pdf", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ html: exportHtml, config: { ...exportConfig, sourceHeight: totalHeight, slices } }),
-        });
+          signal: pdfController.signal,
+        }).finally(() => window.clearTimeout(pdfTimeout));
         if (!response.ok) {
           const payload = await response.json().catch(() => null) as { error?: string } | null;
           const message = response.status === 413
@@ -500,7 +503,10 @@ export default function Home() {
       setExportDetail("Ready");
       console.info("[EXPORT] Download triggered", { pages: logicalPages.length, files: outputs.length });
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "The export could not be generated.";
+      const timedOut = reason instanceof DOMException && reason.name === "AbortError";
+      const message = timedOut
+        ? "PDF generation took too long. Try fewer selected exchanges or a smaller page composition."
+        : reason instanceof Error ? reason.message : "The export could not be generated.";
       console.error("[EXPORT] Failed", reason);
       setExportError(message);
       setExportPhase("error");

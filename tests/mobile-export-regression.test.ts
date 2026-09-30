@@ -39,6 +39,12 @@ test("iOS receives the completed file without suspending export in a blank tab",
   assert.doesNotMatch(pageSource, /window\.open\(/);
 });
 
+test("1-in-1 PDF uses native print pagination without cloning the whole document per page", () => {
+  assert.match(extractorSource, /if \(slices\.length && composition > 1\)/);
+  assert.match(extractorSource, /Native 1-in-1 pagination/);
+  assert.match(pageSource, /pdfController\.abort\(\), 125_000/);
+});
+
 test("mobile capture keeps deterministic desktop document geometry", () => {
   assert.match(pageSource, /windowWidth: Math\.max\(1440, pageWidth\)/);
   assert.match(appCss, /\.conversation-document\.export-capture \.conversation-document-meta\{grid-template-columns:1fr auto auto/);
