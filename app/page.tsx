@@ -242,15 +242,16 @@ async function measureDocumentPages(source: HTMLElement, config: ExportConfig): 
   return { slices, totalHeight };
 }
 
-async function renderDocumentPages(source: HTMLElement, config: ExportConfig, captureScale: number, onProgress?: (page: number, total: number) => void): Promise<LogicalPageRender[]> {
+async function renderDocumentPages(source: HTMLElement, config: ExportConfig, captureScale: number, onProgress?: (page: number, total: number) => void, pageLimit?: number): Promise<LogicalPageRender[]> {
   const { default: html2canvas } = await import("html2canvas");
   const { width: pageWidth, height: pageHeight, margin } = pageGeometry(config);
   const printableWidth = pageWidth - margin * 2;
   const { slices, totalHeight } = await measureDocumentPages(source, config);
   const pages: LogicalPageRender[] = [];
+  const renderedSlices = pageLimit ? slices.slice(0, pageLimit) : slices;
   try {
-    for (const { offset, end } of slices) {
-    onProgress?.(pages.length + 1, slices.length);
+    for (const { offset, end } of renderedSlices) {
+    onProgress?.(pages.length + 1, renderedSlices.length);
     // Start continuation captures just past the midpoint break. html2canvas can
     // retain a sub-pixel antialiasing fringe from the preceding line otherwise.
     const captureOffset = offset === 0 ? 0 : Math.min(end - 1, offset + 2);
@@ -374,6 +375,7 @@ export default function Home() {
   const [orientation, setOrientation] = useState<Orientation>("portrait");
   const [composition, setComposition] = useState<PageComposition>(1);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
+  const [previewTotalPages, setPreviewTotalPages] = useState(0);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [previewRendering, setPreviewRendering] = useState(false);
   const [previewFit, setPreviewFit] = useState<"page" | "width">("width");
@@ -401,28 +403,31 @@ export default function Home() {
     localStorage.setItem("paicture-export-config", JSON.stringify({ ...exportConfig, appearance: documentAppearance }));
   }, [exportConfig, documentAppearance]);
   useEffect(() => {
-    if (!selectedMessages.length || !previewRef.current) { setPreviewPages([]); return; }
+    if (!selectedMessages.length || !previewRef.current) { setPreviewPages([]); setPreviewTotalPages(0); return; }
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setPreviewRendering(true);
       setPreviewPages([]);
-      setPreviewExpanded(false);
       try {
         // Preview pixels are display-only. A lower fixed scale keeps every page
         // affordable on iOS without changing document geometry or pagination.
-        const logicalPages = await renderDocumentPages(previewRef.current!, exportConfig, .65);
+        const { slices } = await measureDocumentPages(previewRef.current!, exportConfig);
+        const totalOutputPages = Math.ceil(slices.length / composition);
+        const logicalPageLimit = previewExpanded ? undefined : 3 * composition;
+        const logicalPages = await renderDocumentPages(previewRef.current!, exportConfig, .65, undefined, logicalPageLimit);
         const finalPages = composePageCanvases(logicalPages, composition, exportConfig);
         if (cancelled) return;
         const previews = finalPages.map((page) => page.toDataURL("image/jpeg", .82));
         logicalPages.forEach(({ canvas }) => { canvas.width = 1; canvas.height = 1; });
         finalPages.forEach((canvas) => { canvas.width = 1; canvas.height = 1; });
+        setPreviewTotalPages(totalOutputPages);
         setPreviewPages(previews);
       } catch (reason) {
         console.error("[PREVIEW] Page rendering failed", reason);
       } finally { if (!cancelled) setPreviewRendering(false); }
     }, 260);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [selectedMessages, documentAppearance, exportConfig, composition]);
+  }, [selectedMessages, documentAppearance, exportConfig, composition, previewExpanded]);
 
   async function processConversation(event: React.FormEvent) {
     event.preventDefault();
@@ -554,6 +559,7 @@ export default function Home() {
 
   function updateSelection(next: string[]) {
     setSelectedExchangeIds(next);
+    setPreviewExpanded(false);
     setExportPhase("idle");
     setExportError("");
   }
@@ -587,11 +593,11 @@ export default function Home() {
       {exchanges.length ? <section className="exchange-selector" aria-labelledby="exchange-selector-title"><div className="exchange-selector-head"><div><h3 id="exchange-selector-title">Choose Q&amp;A exchanges</h3><p><strong>{selectedExchangeIds.length}</strong> of {exchanges.length} selected · Complete answers are always exported.</p></div><div className="exchange-actions"><button type="button" onClick={() => updateSelection(exchanges.map(({ id }) => id))}>Select all</button><button type="button" onClick={() => updateSelection([])}>Clear all</button><button type="button" onClick={() => updateSelection([exchanges.at(-1)!.id])}>Latest only</button></div></div><div className="exchange-list">{exchanges.map((exchange) => { const selected = selectedExchangeIds.includes(exchange.id); return <label className={`exchange-option ${selected ? "selected" : ""}`} key={exchange.id}><input type="checkbox" checked={selected} onChange={() => toggleExchange(exchange)} /><span className="exchange-number">{String(exchange.index).padStart(2, "0")}</span><span className="exchange-copy"><strong>{exchangePreview(exchange.userMessages) || "Question"}</strong><small>{exchangePreview(exchange.assistantMessages) || "Answer"}</small></span><span className="exchange-check" aria-hidden="true">{selected ? <Check size={16} /> : null}</span></label>; })}</div></section> : <div className="selection-warning" role="alert"><strong>No complete Q&amp;A exchange was found.</strong><span>pAIcture will not export the full conversation automatically. Try another complete shared conversation.</span></div>}
       <div className="preview-shell">
         <div className="preview-column">
-          <div className="preview-label"><span className="section-index">02 / Final Preview</span><span>{selectedMessages.length ? `${previewPages.length || "…"} output ${format === "pdf" ? "page" : "image"}${previewPages.length === 1 ? "" : "s"} · ${paperSizes[paper].label} ${orientation} · ${composition}-in-1` : "Nothing selected"}</span>{selectedMessages.length ? <span className="preview-fit-controls" aria-label="Preview zoom"><button type="button" className={previewFit === "page" ? "selected" : ""} onClick={() => setPreviewFit("page")}>Fit page</button><button type="button" className={previewFit === "width" ? "selected" : ""} onClick={() => setPreviewFit("width")}>Fit width</button></span> : null}</div>
+          <div className="preview-label"><span className="section-index">02 / Final Preview</span><span>{selectedMessages.length ? `${previewTotalPages || "…"} output ${format === "pdf" ? "page" : "image"}${previewTotalPages === 1 ? "" : "s"} · ${paperSizes[paper].label} ${orientation} · ${composition}-in-1` : "Nothing selected"}</span>{selectedMessages.length ? <span className="preview-fit-controls" aria-label="Preview zoom"><button type="button" className={previewFit === "page" ? "selected" : ""} onClick={() => setPreviewFit("page")}>Fit page</button><button type="button" className={previewFit === "width" ? "selected" : ""} onClick={() => setPreviewFit("width")}>Fit width</button></span> : null}</div>
           {selectedMessages.length ? <>
             <div className="export-source-host" aria-hidden="true"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={selectedMessages} dateLabel={documentDate} appearance={documentAppearance} /></div>
             <div className={`page-preview-stage fit-${previewFit}`}>
-              {previewRendering ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the final pages…</strong></div> : <><div className="page-preview-list">{(previewExpanded ? previewPages : previewPages.slice(0, 3)).map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>{format === "pdf" ? "Output page" : "Image"} {index + 1}</figcaption><img src={src} alt={`Final ${format === "pdf" ? "PDF page" : "PNG image"} ${index + 1}`} /></figure>)}</div>{previewPages.length > 3 ? <button type="button" className="preview-page-toggle" aria-expanded={previewExpanded} onClick={() => setPreviewExpanded((expanded) => !expanded)}>{previewExpanded ? "Collapse to first 3 pages" : `Expand all ${previewPages.length} pages`}</button> : null}</>}
+              {previewRendering ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the final pages…</strong></div> : <><div className="page-preview-list">{previewPages.map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>{format === "pdf" ? "Output page" : "Image"} {index + 1}</figcaption><img src={src} alt={`Final ${format === "pdf" ? "PDF page" : "PNG image"} ${index + 1}`} /></figure>)}</div>{previewTotalPages > 3 ? <button type="button" className="preview-page-toggle" aria-expanded={previewExpanded} onClick={() => setPreviewExpanded((expanded) => !expanded)}>{previewExpanded ? "Collapse to first 3 pages" : `Expand all ${previewTotalPages} pages`}</button> : null}</>}
             </div>
           </> : <div className="empty-preview"><EmptyDocumentVisual /><strong>Your conversation will appear here.</strong><span>Select at least one Q&amp;A exchange to build the preview.</span></div>}
         </div>

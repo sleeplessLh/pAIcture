@@ -24,7 +24,8 @@ test("image-heavy PDF transport is compressed before crossing the Vercel body li
 });
 
 test("mobile preview uses a fixed low-memory raster scale and releases canvases", () => {
-  assert.match(pageSource, /renderDocumentPages\(previewRef\.current!, exportConfig, \.65\)/);
+  assert.match(pageSource, /renderDocumentPages\(previewRef\.current!, exportConfig, \.65, undefined, logicalPageLimit\)/);
+  assert.match(pageSource, /previewExpanded \? undefined : 3 \* composition/);
   assert.match(pageSource, /canvas\.width = 1; canvas\.height = 1/);
 });
 
@@ -49,8 +50,8 @@ test("mobile PDF uses a native form navigation instead of an asynchronous Blob d
 });
 
 test("preview initially shows three pages and provides an explicit expand-collapse control", () => {
-  assert.match(pageSource, /previewPages\.slice\(0, 3\)/);
-  assert.match(pageSource, /Expand all \$\{previewPages\.length\} pages/);
+  assert.match(pageSource, /previewTotalPages > 3/);
+  assert.match(pageSource, /Expand all \$\{previewTotalPages\} pages/);
   assert.match(pageSource, /Collapse to first 3 pages/);
 });
 
