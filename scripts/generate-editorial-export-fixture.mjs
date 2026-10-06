@@ -25,7 +25,7 @@ const appearance = process.env.DOCUMENT_APPEARANCE === "dark" ? "dark" : "light"
 const paper = ["A4", "A3", "Letter"].includes(process.env.PAPER_SIZE) ? process.env.PAPER_SIZE : "A4";
 const landscape = process.env.ORIENTATION === "landscape";
 const suffix = `${paper.toLowerCase()}-${landscape ? "landscape" : "portrait"}-${appearance}`;
-const margin = paper === "A3" ? "21.7mm" : "18mm";
+const margin = "21.7mm";
 const pageDimensions = { A4: [794, 1123], A3: [1123, 1587], Letter: [816, 1056] }[paper];
 const [pageWidth, pageHeight] = landscape ? [pageDimensions[1], pageDimensions[0]] : pageDimensions;
 const documentHtml = `<div class="conversation-document" data-appearance="${appearance}"><header class="conversation-document-head"><div class="conversation-document-brand"><span>pAIcture</span><i></i></div><p class="conversation-document-kicker">AI conversation document</p><h3>Understanding MVCC, Locks, and Read Views</h3><div class="conversation-document-meta"><span><small>Exported</small>September 27, 2026</span><span><small>Source</small>ChatGPT</span><span><small>Selected</small>3 exchanges</span></div></header><div class="conversation-messages">${exchanges}</div></div>`;

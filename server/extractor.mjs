@@ -298,8 +298,8 @@ createServer(async (request, response) => {
       const paper = ["a4", "a3", "letter"].includes(body.config?.paper) ? body.config.paper : "a4";
       const orientation = body.config?.orientation === "landscape" ? "landscape" : "portrait";
       const paperFormat = paper === "a3" ? "A3" : paper === "letter" ? "Letter" : "A4";
-      const margin = paper === "a3" ? "21.7mm" : "18mm";
-      const baseGeometry = paper === "a3" ? { width: 1123, height: 1587, margin: 82 } : paper === "letter" ? { width: 816, height: 1056, margin: 68 } : { width: 794, height: 1123, margin: 68 };
+      const margin = "21.7mm";
+      const baseGeometry = paper === "a3" ? { width: 1123, height: 1587, margin: 82 } : paper === "letter" ? { width: 816, height: 1056, margin: 82 } : { width: 794, height: 1123, margin: 82 };
       const geometry = orientation === "landscape" ? { width: baseGeometry.height, height: baseGeometry.width, margin: baseGeometry.margin } : baseGeometry;
       const composition = [1, 2, 4].includes(body.config?.composition) ? body.config.composition : 1;
       const slices = Array.isArray(body.config?.slices) ? body.config.slices

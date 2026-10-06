@@ -17,9 +17,9 @@ type PageComposition = 1 | 2 | 4;
 type ExportConfig = { paper: PaperSize; orientation: Orientation; composition: PageComposition };
 const platforms: Record<Platform, { name: string; mark: string }> = { chatgpt: { name: "ChatGPT", mark: "◎" } };
 const paperSizes: Record<PaperSize, { label: string; width: number; height: number; margin: number }> = {
-  a4: { label: "A4", width: 794, height: 1123, margin: 68 },
+  a4: { label: "A4", width: 794, height: 1123, margin: 82 },
   a3: { label: "A3", width: 1123, height: 1587, margin: 82 },
-  letter: { label: "Letter", width: 816, height: 1056, margin: 68 },
+  letter: { label: "Letter", width: 816, height: 1056, margin: 82 },
 };
 
 function normalizeShareUrl(value: string) {
@@ -274,9 +274,10 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
       context.fillStyle = source.dataset.appearance === "dark" ? "#99968f" : "#8a8a85";
       context.font = `${9 * captureScale}px ${documentTheme.fontFamily}`;
       context.textAlign = "left";
-      context.fillText("pAIcture", margin * captureScale, (pageHeight - 24) * captureScale);
+      const footerBaseline = pageHeight - margin / 2;
+      context.fillText("pAIcture", margin * captureScale, footerBaseline * captureScale);
       context.textAlign = "right";
-      context.fillText(String(pages.length + 1), (pageWidth - margin) * captureScale, (pageHeight - 24) * captureScale);
+      context.fillText(String(pages.length + 1), (pageWidth - margin) * captureScale, footerBaseline * captureScale);
     }
       pages.push({ canvas: page, offset, end });
     }
@@ -337,9 +338,10 @@ function composePageCanvases(logicalPages: LogicalPageRender[], perImage: PageCo
     context.fillStyle = "#8a8a85";
     context.font = `${9 * captureScale}px ${documentTheme.fontFamily}`;
     context.textAlign = "left";
-    context.fillText("pAIcture", margin, pageHeight - 24 * captureScale);
+    const footerBaseline = pageHeight - margin / 2;
+    context.fillText("pAIcture", margin, footerBaseline);
     context.textAlign = "right";
-    context.fillText(`${groups.length + 1} / ${totalGroups}`, pageWidth - margin, pageHeight - 24 * captureScale);
+    context.fillText(`${groups.length + 1} / ${totalGroups}`, pageWidth - margin, footerBaseline);
     groups.push(canvas);
   }
   return groups;

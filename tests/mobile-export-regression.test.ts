@@ -71,3 +71,12 @@ test("export surfaces avoid unsupported modern color functions", () => {
   assert.doesNotMatch(exportCss, /color-mix\(|oklch\(|lab\(|lch\(|\bcolor\(/);
   assert.match(appCss, /\.conversation-document\.export-capture \.conversation-message-content a\{text-decoration-color:rgba\(/);
 });
+
+test("all export page sizes keep balanced 1:1 margins and center the footer inside the margin", () => {
+  assert.match(pageSource, /a4: \{ label: "A4", width: 794, height: 1123, margin: 82 \}/);
+  assert.match(pageSource, /letter: \{ label: "Letter", width: 816, height: 1056, margin: 82 \}/);
+  assert.match(pageSource, /const footerBaseline = pageHeight - margin \/ 2/);
+  assert.match(extractorSource, /const margin = "21\.7mm"/);
+  assert.match(extractorSource, /margin: \{ top: margin, right: margin, bottom: margin, left: margin \}/);
+  assert.match(exportCss, /@page\{size:A4 portrait;margin:21\.7mm\}/);
+});
