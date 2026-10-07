@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { PDFDocument } from "pdf-lib";
 import { exportDocumentCss } from "../lib/export-document-style.mjs";
 
 const port = Number(process.env.PORT || 8789);
@@ -332,8 +333,9 @@ createServer(async (request, response) => {
         // Compose every logical page explicitly. Chromium's native flow can
         // visually collapse the top margin on continuation pages, so 1-in-1
         // must use the same deterministic page windows as N-in-1 output.
+        let layoutMetrics = null;
         if (slices.length) {
-          const layoutMetrics = await page.evaluate(({ slices, sourceHeight, composition, geometry, orientation }) => {
+          layoutMetrics = await page.evaluate(({ slices, sourceHeight, composition, geometry, orientation }) => {
             const source = document.querySelector(".conversation-document");
             if (!(source instanceof HTMLElement)) throw new Error("EXPORT_DOCUMENT_NOT_FOUND");
             const serverSourceHeight = source.scrollHeight;
@@ -385,8 +387,12 @@ createServer(async (request, response) => {
             const style = document.createElement("style");
             style.textContent = `html,body{margin:0!important;padding:0!important;background:${paperColor}!important}.final-output-page{position:relative;width:${printableWidth}px;height:${printableHeight}px;box-sizing:border-box;break-after:page;page-break-after:always;overflow:hidden;background:${paperColor}}.final-output-page:last-child{break-after:auto;page-break-after:auto}.final-output-page :where(*){break-before:auto!important;break-after:auto!important;break-inside:auto!important;page-break-before:auto!important;page-break-after:auto!important;page-break-inside:auto!important}.final-grid{position:relative;width:100%;height:100%;display:grid;grid-template-columns:repeat(${columns},${cellWidth}px);grid-template-rows:repeat(${rows},${cellHeight}px);gap:${gap}px}.final-tile{position:relative;width:${cellWidth}px;height:${cellHeight}px;overflow:visible;justify-self:center;align-self:center}.logical-paper{position:absolute;width:${pageWidth}px;height:${pageHeight}px;transform:scale(${logicalScale});transform-origin:top left;background:${paperColor};box-shadow:0 0 0 1px rgba(100,95,88,.24)}.logical-window{position:absolute;left:${margin}px;top:${margin}px;width:${printableWidth}px;height:${printableHeight}px;overflow:hidden}.logical-window>.conversation-document{position:absolute!important;left:0!important;width:${printableWidth}px!important;max-width:none!important;margin:0!important}`;
             document.head.appendChild(style);
-            const root = document.createDocumentFragment();
-            for (let start = 0; start < scaledSlices.length; start += composition) {
+            const sourceHolder = document.createElement("div");
+            sourceHolder.style.display = "none";
+            sourceHolder.appendChild(source);
+            const renderOutputPage = (outputIndex) => {
+              const root = document.createDocumentFragment();
+              const start = outputIndex * composition;
               const items = scaledSlices.slice(start, start + composition);
               const outputPage = document.createElement("section");
               outputPage.className = "final-output-page";
@@ -432,9 +438,11 @@ createServer(async (request, response) => {
                 outputPage.appendChild(grid);
               }
               root.appendChild(outputPage);
-            }
-            document.body.replaceChildren(root);
-            return { clientSourceHeight: sourceHeight, clientLogicalPages: slices.length, serverSourceHeight, heightScale, logicalPages: scaledSlices.length };
+              document.body.replaceChildren(sourceHolder, root);
+            };
+            window.__paictureRenderOutputPage = renderOutputPage;
+            renderOutputPage(0);
+            return { clientSourceHeight: sourceHeight, clientLogicalPages: slices.length, serverSourceHeight, heightScale, logicalPages: scaledSlices.length, outputPages: Math.ceil(scaledSlices.length / composition) };
           }, { slices, sourceHeight, composition, geometry, orientation });
           console.info("[PDF] Final layout composed", layoutMetrics);
           await page.evaluate(async () => {
@@ -444,18 +452,35 @@ createServer(async (request, response) => {
         } else console.info("[PDF] No client pagination slices supplied");
         await page.emulateMedia({ media: "print" });
         const pdfStartedAt = Date.now();
-        const pdf = await page.pdf({
+        const outputPages = slices.length ? layoutMetrics.outputPages : 1;
+        const merged = outputPages > 1 ? await PDFDocument.create() : null;
+        let pdf;
+        for (let outputIndex = 0; outputIndex < outputPages; outputIndex++) {
+          if (outputIndex) await page.evaluate((index) => {
+            window.__paictureRenderOutputPage(index);
+          }, outputIndex);
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          const part = await page.pdf({
           format: paperFormat,
           landscape: orientation === "landscape",
           printBackground: true,
           preferCSSPageSize: true,
           displayHeaderFooter: true,
           headerTemplate: "<span></span>",
-          footerTemplate: `<div style="box-sizing:border-box;width:100%;padding:0 ${margin};color:#8a8a85;font:9px Arial,sans-serif;display:flex;justify-content:space-between"><span>pAIcture</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`,
+          footerTemplate: `<div style="box-sizing:border-box;width:100%;padding:0 ${margin};color:#8a8a85;font:9px Arial,sans-serif;display:flex;justify-content:space-between"><span>pAIcture</span><span>${outputIndex + 1} / ${outputPages}</span></div>`,
           margin: { top: margin, right: margin, bottom: margin, left: margin },
           tagged: true,
           outline: true,
-        });
+          });
+          if (merged) {
+            const partDocument = await PDFDocument.load(part);
+            if (partDocument.getPageCount() !== 1) throw new Error("PDF_OUTPUT_PAGE_COUNT_MISMATCH");
+            const [copiedPage] = await merged.copyPages(partDocument, [0]);
+            merged.addPage(copiedPage);
+          } else pdf = part;
+          console.info("[PDF] Output page rendered", { page: outputIndex + 1, total: outputPages, bytes: part.length });
+        }
+        if (merged) pdf = Buffer.from(await merged.save());
         response.writeHead(200, {
           "Content-Type": "application/pdf",
           "Content-Length": String(pdf.length),
