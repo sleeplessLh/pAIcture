@@ -8,6 +8,8 @@ const exportCss = readFileSync(new URL("../lib/export-document-style.mjs", impor
 const importRoute = readFileSync(new URL("../app/api/import/chatgpt/route.ts", import.meta.url), "utf8");
 const exportRoute = readFileSync(new URL("../app/api/export/pdf/route.ts", import.meta.url), "utf8");
 const extractorSource = readFileSync(new URL("../server/extractor.mjs", import.meta.url), "utf8");
+const layoutSource = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
+const themeSource = readFileSync(new URL("../lib/document-theme.ts", import.meta.url), "utf8");
 
 test("PDF pagination uses measurement without invoking the raster renderer", () => {
   const pdfBranch = pageSource.slice(pageSource.indexOf('if (format === "pdf")'), pageSource.indexOf("const captureScale = 2"));
@@ -65,6 +67,28 @@ test("1-in-1 PDF uses deterministic page windows so every page keeps its top mar
 test("manual PDF page windows disable nested print fragmentation", () => {
   assert.match(extractorSource, /\.final-output-page :where\(\*\)\{break-before:auto!important;break-after:auto!important;break-inside:auto!important/);
   assert.match(extractorSource, /page-break-before:auto!important;page-break-after:auto!important;page-break-inside:auto!important/);
+});
+
+test("PDF measures at the final printable width with the same embedded font as Preview", () => {
+  const widthAssignment = extractorSource.indexOf("source.style.width = `${width - margin * 2}px`");
+  const heightMeasurement = extractorSource.indexOf("const serverSourceHeight = source.scrollHeight");
+  assert.ok(widthAssignment > 0 && widthAssignment < heightMeasurement);
+  assert.match(layoutSource, /@fontsource-variable\/noto-sans-sc\/index\.css/);
+  assert.match(themeSource, /fontFamily: '"Noto Sans SC Variable"/);
+  assert.match(exportCss, /font-family: "Noto Sans SC Variable"/);
+});
+
+test("long display equations are fitted before client and PDF pagination", () => {
+  assert.match(pageSource, /fitDisplayMath\(root\)/);
+  assert.match(extractorSource, /page\.evaluate\(fitDisplayMath\)/);
+});
+
+test("continuation pages reserve a safe inset instead of masking their first text line", () => {
+  assert.match(pageSource, /const usableHeight = printableHeight - 16/);
+  assert.match(extractorSource, /const usableHeight = printableHeight - 16/);
+  assert.match(pageSource, /const captureOffset = Math\.max\(0, offset - 8\)/);
+  assert.match(extractorSource, /clone\.style\.top = `\$\{8 - slice\.offset\}px`/);
+  assert.doesNotMatch(pageSource, /fillRect\(margin \* captureScale, margin \* captureScale, printableWidth \* captureScale, 18/);
 });
 
 test("mobile capture keeps deterministic desktop document geometry", () => {

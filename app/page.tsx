@@ -6,6 +6,7 @@ import { ArrowRight, Check, ChevronDown, Download, FileImage, FileText, Link2, L
 import { ConversationDocument } from "@/components/conversation-document";
 import { ChatBubble3D, DocumentStack, EmptyDocumentVisual, FloatingPage, ProgressJourney, Sparkle, type JourneyStage } from "@/components/workshop-visuals";
 import { documentTheme } from "@/lib/document-theme";
+import { fitDisplayMath } from "@/lib/export-math-fit.mjs";
 import { groupConversationExchanges, messagesForSelectedExchanges, type ConversationExchange } from "@/lib/conversation/exchanges";
 
 type Platform = "chatgpt";
@@ -111,6 +112,8 @@ async function waitForDocumentReady(root: HTMLElement) {
     if (image.naturalWidth && image.decode) await image.decode().catch(() => undefined);
   }));
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  fitDisplayMath(root);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 function isIosBrowser() {
@@ -225,6 +228,7 @@ async function measureDocumentPages(source: HTMLElement, config: ExportConfig): 
   const { width: pageWidth, height: pageHeight, margin } = pageGeometry(config);
   const printableWidth = pageWidth - margin * 2;
   const printableHeight = pageHeight - margin * 2;
+  const usableHeight = printableHeight - 16;
   source.style.setProperty("--export-capture-width", `${printableWidth}px`);
   source.classList.add("export-capture");
   await waitForDocumentReady(source);
@@ -244,18 +248,22 @@ async function measureDocumentPages(source: HTMLElement, config: ExportConfig): 
         if (previous && Math.abs(previous.top - rect.top) < 1.5) previous.bottom = Math.max(previous.bottom, rect.bottom);
         else lines.push({ top: rect.top, bottom: rect.bottom });
       }
-      return lines.slice(1).map((line, index) => Math.round((lines[index].bottom + line.top) / 2 - sourceTop));
+      return lines.flatMap((line, index) => {
+        if (index < 2 || lines.length - index < 2) return [];
+        const previous = lines[index - 1];
+        return line.top - previous.bottom >= 1 ? [Math.round((previous.bottom + line.top) / 2 - sourceTop)] : [];
+      });
     });
   const safeBreaks = [...elementBreaks, ...lineBreaks].sort((a, b) => a - b);
-  const protectedRanges = [...source.querySelectorAll(".conversation-message.user, pre, blockquote, table, .conversation-image, img")]
+  const protectedRanges = [...source.querySelectorAll(".conversation-message.user, pre, blockquote, table, .conversation-image, .math-display, img")]
     .map((element) => { const rect = element.getBoundingClientRect(); return { top: Math.round(rect.top - sourceTop), bottom: Math.round(rect.bottom - sourceTop) }; })
-    .filter((range) => range.bottom - range.top < printableHeight);
+    .filter((range) => range.bottom - range.top < usableHeight);
   const slices: PageSlice[] = [];
   for (let offset = 0; offset < totalHeight;) {
-    const idealEnd = Math.min(offset + printableHeight, totalHeight);
-    const protectedAtEnd = protectedRanges.find((range) => range.top < idealEnd && range.bottom > idealEnd && range.top > offset + printableHeight * .3);
+    const idealEnd = Math.min(offset + usableHeight, totalHeight);
+    const protectedAtEnd = protectedRanges.find((range) => range.top < idealEnd && range.bottom > idealEnd && range.top > offset + usableHeight * .3);
     const targetEnd = protectedAtEnd?.top || idealEnd;
-    const earliestBreak = offset + Math.floor(printableHeight * .68);
+    const earliestBreak = offset + Math.floor(usableHeight * .68);
     const safeEnd = safeBreaks.filter((position) => position >= earliestBreak && position <= targetEnd).at(-1);
     const end = idealEnd === totalHeight ? totalHeight : safeEnd || targetEnd;
     slices.push({ offset, end });
@@ -274,9 +282,9 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
   try {
     for (const { offset, end } of renderedSlices) {
     onProgress?.(pages.length + 1, renderedSlices.length);
-    // Start continuation captures just past the midpoint break. html2canvas can
-    // retain a sub-pixel antialiasing fringe from the preceding line otherwise.
-    const captureOffset = offset === 0 ? 0 : Math.min(end - 1, offset + 2);
+    // Capture a small bleed before each continuation. The content begins 8px
+    // inside the page window, so glyph ascenders cannot be clipped at its top.
+    const captureOffset = Math.max(0, offset - 8);
     const sliceHeight = Math.max(1, end - captureOffset);
     const page = document.createElement("canvas");
     page.width = Math.ceil(pageWidth * captureScale);
@@ -287,11 +295,7 @@ async function renderDocumentPages(source: HTMLElement, config: ExportConfig, ca
     context.fillStyle = paperColor;
     context.fillRect(0, 0, page.width, page.height);
     const slice = await html2canvas(source, { scale: captureScale, backgroundColor: paperColor, useCORS: true, logging: false, x: 0, y: captureOffset, width: source.scrollWidth, height: sliceHeight, windowWidth: Math.max(1440, pageWidth), windowHeight: Math.max(1800, totalHeight), scrollX: 0, scrollY: 0 });
-    context.drawImage(slice, 0, 0, slice.width, slice.height, margin * captureScale, margin * captureScale, printableWidth * captureScale, sliceHeight * captureScale);
-    if (offset > 0) {
-      context.fillStyle = paperColor;
-      context.fillRect(margin * captureScale, margin * captureScale, printableWidth * captureScale, 18 * captureScale);
-    }
+    context.drawImage(slice, 0, 0, slice.width, slice.height, margin * captureScale, (margin + 8 - (offset - captureOffset)) * captureScale, printableWidth * captureScale, sliceHeight * captureScale);
     if (config.composition === 1) {
       context.fillStyle = source.dataset.appearance === "dark" ? "#99968f" : "#8a8a85";
       context.font = `${9 * captureScale}px ${documentTheme.fontFamily}`;

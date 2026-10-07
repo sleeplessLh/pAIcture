@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "@fontsource-variable/noto-sans-sc/index.css";
 import "./globals.css";
 const title = "pAIcture — ChatGPT conversations, beautifully kept";
 const description = "Turn public ChatGPT shared conversations into polished PDF documents or high-resolution images.";

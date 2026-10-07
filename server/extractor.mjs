@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { PDFDocument } from "pdf-lib";
 import { exportDocumentCss } from "../lib/export-document-style.mjs";
+import { fitDisplayMath } from "../lib/export-math-fit.mjs";
 
 const port = Number(process.env.PORT || 8789);
 const token = process.env.CHATGPT_EXTRACTOR_TOKEN || "";
@@ -330,6 +331,18 @@ createServer(async (request, response) => {
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           document.documentElement.dataset.exportReady = "true";
         });
+        // Measure at the same printable width used by the cloned output pages.
+        // Measuring at the full viewport width caused reflow after slicing and
+        // bisected lines at page boundaries in the final PDF.
+        await page.evaluate(({ width, margin }) => {
+          const source = document.querySelector(".conversation-document");
+          if (!(source instanceof HTMLElement)) throw new Error("EXPORT_DOCUMENT_NOT_FOUND");
+          source.style.width = `${width - margin * 2}px`;
+          source.style.maxWidth = "none";
+          source.style.margin = "0";
+        }, geometry);
+        await page.evaluate(fitDisplayMath);
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         // Compose every logical page explicitly. Chromium's native flow can
         // visually collapse the top margin on continuation pages, so 1-in-1
         // must use the same deterministic page windows as N-in-1 output.
@@ -343,6 +356,7 @@ createServer(async (request, response) => {
             const { width: pageWidth, height: pageHeight, margin } = geometry;
             const printableWidth = pageWidth - margin * 2;
             const printableHeight = pageHeight - margin * 2;
+            const usableHeight = printableHeight - 16;
             const sourceTop = source.getBoundingClientRect().top;
             const elementBreaks = [...source.querySelectorAll(".conversation-exchange, .conversation-message, .conversation-message-content > *:not(:first-child), tr")]
               .map((element) => Math.round(element.getBoundingClientRect().top - sourceTop))
@@ -358,18 +372,22 @@ createServer(async (request, response) => {
                   if (previous && Math.abs(previous.top - rect.top) < 1.5) previous.bottom = Math.max(previous.bottom, rect.bottom);
                   else lines.push({ top: rect.top, bottom: rect.bottom });
                 }
-                return lines.slice(1).map((line, index) => Math.round((lines[index].bottom + line.top) / 2 - sourceTop));
+                return lines.flatMap((line, index) => {
+                  if (index < 2 || lines.length - index < 2) return [];
+                  const previous = lines[index - 1];
+                  return line.top - previous.bottom >= 1 ? [Math.round((previous.bottom + line.top) / 2 - sourceTop)] : [];
+                });
               });
             const safeBreaks = [...elementBreaks, ...lineBreaks].sort((a, b) => a - b);
-            const protectedRanges = [...source.querySelectorAll(".conversation-message.user, pre, blockquote, table, .conversation-image, img")]
+            const protectedRanges = [...source.querySelectorAll(".conversation-message.user, pre, blockquote, table, .conversation-image, .math-display, img")]
               .map((element) => { const rect = element.getBoundingClientRect(); return { top: Math.round(rect.top - sourceTop), bottom: Math.round(rect.bottom - sourceTop) }; })
-              .filter((range) => range.bottom - range.top < printableHeight);
+              .filter((range) => range.bottom - range.top < usableHeight);
             const scaledSlices = [];
             for (let offset = 0; offset < serverSourceHeight;) {
-              const idealEnd = Math.min(offset + printableHeight, serverSourceHeight);
-              const protectedAtEnd = protectedRanges.find((range) => range.top < idealEnd && range.bottom > idealEnd && range.top > offset + printableHeight * .3);
+              const idealEnd = Math.min(offset + usableHeight, serverSourceHeight);
+              const protectedAtEnd = protectedRanges.find((range) => range.top < idealEnd && range.bottom > idealEnd && range.top > offset + usableHeight * .3);
               const targetEnd = protectedAtEnd?.top || idealEnd;
-              const earliestBreak = offset + Math.floor(printableHeight * .68);
+              const earliestBreak = offset + Math.floor(usableHeight * .68);
               const safeEnd = safeBreaks.filter((position) => position >= earliestBreak && position <= targetEnd).at(-1);
               const end = idealEnd === serverSourceHeight ? serverSourceHeight : safeEnd || targetEnd;
               scaledSlices.push({ offset, end });
@@ -401,9 +419,9 @@ createServer(async (request, response) => {
                 windowElement.className = "logical-window";
                 windowElement.style.left = "0";
                 windowElement.style.top = "0";
-                windowElement.style.height = `${Math.min(printableHeight, items[0].end - items[0].offset)}px`;
+                windowElement.style.height = `${Math.min(printableHeight, items[0].end - items[0].offset + 8)}px`;
                 const clone = source.cloneNode(true);
-                clone.style.top = `${-items[0].offset}px`;
+                clone.style.top = `${8 - items[0].offset}px`;
                 windowElement.appendChild(clone);
                 outputPage.appendChild(windowElement);
               } else {
@@ -429,9 +447,9 @@ createServer(async (request, response) => {
                   logicalPaper.style.top = `${(cellHeight - renderedHeight) / 2}px`;
                   const windowElement = document.createElement("div");
                   windowElement.className = "logical-window";
-                  windowElement.style.height = `${Math.min(printableHeight, slice.end - slice.offset)}px`;
+                  windowElement.style.height = `${Math.min(printableHeight, slice.end - slice.offset + 8)}px`;
                   const clone = source.cloneNode(true);
-                  clone.style.top = `${-slice.offset}px`;
+                  clone.style.top = `${8 - slice.offset}px`;
                   windowElement.appendChild(clone);
                   logicalPaper.appendChild(windowElement);
                   tile.appendChild(logicalPaper);
