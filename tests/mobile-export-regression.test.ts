@@ -62,6 +62,11 @@ test("1-in-1 PDF uses deterministic page windows so every page keeps its top mar
   assert.match(pageSource, /pdfController\.abort\(\), 125_000/);
 });
 
+test("manual PDF page windows disable nested print fragmentation", () => {
+  assert.match(extractorSource, /\.final-output-page :where\(\*\)\{break-before:auto!important;break-after:auto!important;break-inside:auto!important/);
+  assert.match(extractorSource, /page-break-before:auto!important;page-break-after:auto!important;page-break-inside:auto!important/);
+});
+
 test("mobile capture keeps deterministic desktop document geometry", () => {
   assert.match(pageSource, /windowWidth: Math\.max\(1440, pageWidth\)/);
   assert.match(appCss, /\.conversation-document\.export-capture \.conversation-document-meta\{grid-template-columns:1fr auto auto/);
