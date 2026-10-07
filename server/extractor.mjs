@@ -401,6 +401,7 @@ createServer(async (request, response) => {
                 windowElement.className = "logical-window";
                 windowElement.style.left = "0";
                 windowElement.style.top = "0";
+                windowElement.style.height = `${Math.min(printableHeight, items[0].end - items[0].offset)}px`;
                 const clone = source.cloneNode(true);
                 clone.style.top = `${-items[0].offset}px`;
                 windowElement.appendChild(clone);
@@ -428,6 +429,7 @@ createServer(async (request, response) => {
                   logicalPaper.style.top = `${(cellHeight - renderedHeight) / 2}px`;
                   const windowElement = document.createElement("div");
                   windowElement.className = "logical-window";
+                  windowElement.style.height = `${Math.min(printableHeight, slice.end - slice.offset)}px`;
                   const clone = source.cloneNode(true);
                   clone.style.top = `${-slice.offset}px`;
                   windowElement.appendChild(clone);
