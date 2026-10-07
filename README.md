@@ -35,6 +35,8 @@ The complete portfolio-ready English set is available in [`public/project-galler
 
 Public ChatGPT `/share/...` links are supported. pAIcture does not request ChatGPT credentials, cookies, private conversation URLs, browser extensions, or manual transcripts.
 
+The optional Manifest V3 browser extension is maintained as the separate sibling project `D:\BBB_vibecoding_project\pAIcture_extension`. It complements the URL importer by reading the already-rendered DOM of the current public ChatGPT share page after an explicit user click. It requests no cookie, history, or account permissions and hands the normalized conversation to this same Export Studio through a one-time session token.
+
 ## Architecture
 
 - **Application:** React 19 + Next.js-compatible routes, deployed on Vercel.

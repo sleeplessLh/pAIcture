@@ -55,9 +55,10 @@ test("preview initially shows three pages and provides an explicit expand-collap
   assert.match(pageSource, /Collapse to first 3 pages/);
 });
 
-test("1-in-1 PDF uses native print pagination without cloning the whole document per page", () => {
-  assert.match(extractorSource, /if \(slices\.length && composition > 1\)/);
-  assert.match(extractorSource, /Native 1-in-1 pagination/);
+test("1-in-1 PDF uses deterministic page windows so every page keeps its top margin", () => {
+  assert.match(extractorSource, /if \(slices\.length\)/);
+  assert.match(extractorSource, /composition === 1/);
+  assert.doesNotMatch(extractorSource, /Native 1-in-1 pagination/);
   assert.match(pageSource, /pdfController\.abort\(\), 125_000/);
 });
 
@@ -72,11 +73,12 @@ test("export surfaces avoid unsupported modern color functions", () => {
   assert.match(appCss, /\.conversation-document\.export-capture \.conversation-message-content a\{text-decoration-color:rgba\(/);
 });
 
-test("all export page sizes keep balanced 1:1 margins and center the footer inside the margin", () => {
-  assert.match(pageSource, /a4: \{ label: "A4", width: 794, height: 1123, margin: 82 \}/);
-  assert.match(pageSource, /letter: \{ label: "Letter", width: 816, height: 1056, margin: 82 \}/);
+test("all export page sizes keep equal one-inch margins and center the footer inside the margin", () => {
+  assert.match(pageSource, /a4: \{ label: "A4", width: 794, height: 1123, margin: 96 \}/);
+  assert.match(pageSource, /a3: \{ label: "A3", width: 1123, height: 1587, margin: 96 \}/);
+  assert.match(pageSource, /letter: \{ label: "Letter", width: 816, height: 1056, margin: 96 \}/);
   assert.match(pageSource, /const footerBaseline = pageHeight - margin \/ 2/);
-  assert.match(extractorSource, /const margin = "21\.7mm"/);
+  assert.match(extractorSource, /const margin = "25\.4mm"/);
   assert.match(extractorSource, /margin: \{ top: margin, right: margin, bottom: margin, left: margin \}/);
-  assert.match(exportCss, /@page\{size:A4 portrait;margin:21\.7mm\}/);
+  assert.match(exportCss, /@page\{size:A4 portrait;margin:25\.4mm\}/);
 });

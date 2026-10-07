@@ -10,17 +10,22 @@
   "keywords": ["chatgpt", "pdf", "conversation", "export"],
   "extensions": {
     "com.openai": {
-      "apps": "./.app.json",
       "interface": {
         "displayName": "pAIcture",
-        "shortDescription": "Export AI conversations as PDF or images.",
+        "shortDescription": "Export chats to PDF or PNG",
         "longDescription": "Prepare the current ChatGPT conversation as a faithful document preview, then save it as an A4 PDF or paginated high-resolution PNG images.",
         "developerName": "pAIcture",
         "category": "Productivity",
-        "capabilities": ["Read", "Interactive"],
+        "capabilities": ["Format conversations", "Export PDF", "Export PNG"],
         "websiteURL": "https://paicture-plugin.lawrancehii12345.chatgpt.site",
+        "supportURL": "https://paicture-plugin.lawrancehii12345.chatgpt.site/support",
+        "privacyPolicyURL": "https://paicture-plugin.lawrancehii12345.chatgpt.site/privacy",
+        "termsOfServiceURL": "https://paicture-plugin.lawrancehii12345.chatgpt.site/terms",
         "defaultPrompt": ["Export this conversation with pAIcture.", "Create a PDF preview of this chat.", "Turn this conversation into PNG pages."],
-        "brandColor": "#ED5B35"
+        "brandColor": "#C43D1B",
+        "brandColorDark": "#FF9275",
+        "composerIcon": "./assets/icon.svg",
+        "logo": "./assets/logo.svg"
       }
     }
   }

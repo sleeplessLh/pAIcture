@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "paicture": {
-      "type": "http",
-      "url": "https://paicture-plugin.lawrancehii12345.chatgpt.site/api/mcp"
-    }
-  }
-}

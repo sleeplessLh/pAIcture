@@ -17,10 +17,33 @@ type PageComposition = 1 | 2 | 4;
 type ExportConfig = { paper: PaperSize; orientation: Orientation; composition: PageComposition };
 const platforms: Record<Platform, { name: string; mark: string }> = { chatgpt: { name: "ChatGPT", mark: "◎" } };
 const paperSizes: Record<PaperSize, { label: string; width: number; height: number; margin: number }> = {
-  a4: { label: "A4", width: 794, height: 1123, margin: 82 },
-  a3: { label: "A3", width: 1123, height: 1587, margin: 82 },
-  letter: { label: "Letter", width: 816, height: 1056, margin: 82 },
+  a4: { label: "A4", width: 794, height: 1123, margin: 96 },
+  a3: { label: "A3", width: 1123, height: 1587, margin: 96 },
+  letter: { label: "Letter", width: 816, height: 1056, margin: 96 },
 };
+
+const extensionImportEvent = "PAICTURE_EXTENSION_IMPORT";
+
+function conversationFromExtension(value: unknown): Conversation | null {
+  if (!value || typeof value !== "object") return null;
+  const payload = value as Record<string, unknown>;
+  if (payload.schemaVersion !== 1 || payload.source !== "paicture-extension" || payload.platform !== "chatgpt") return null;
+  if (typeof payload.title !== "string" || payload.title.length > 500 || !Array.isArray(payload.messages) || payload.messages.length > 500) return null;
+  if (typeof payload.sourceUrl !== "string" || detectPlatform(payload.sourceUrl) !== "chatgpt") return null;
+  const messages: Message[] = [];
+  let totalHtmlLength = 0;
+  for (const candidate of payload.messages) {
+    if (!candidate || typeof candidate !== "object") return null;
+    const message = candidate as Record<string, unknown>;
+    if (typeof message.id !== "string" || message.id.length > 500 || (message.role !== "user" && message.role !== "assistant") || typeof message.html !== "string") return null;
+    totalHtmlLength += message.html.length;
+    if (totalHtmlLength > 25_000_000) return null;
+    messages.push({ id: message.id, role: message.role, html: message.html });
+  }
+  if (!messages.length) return null;
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings.filter((warning): warning is string => typeof warning === "string").slice(0, 50) : undefined;
+  return { title: payload.title.trim() || "ChatGPT conversation", platform: "chatgpt", messages, warnings };
+}
 
 function normalizeShareUrl(value: string) {
   return value.normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").trim();
@@ -404,6 +427,40 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("paicture-export-config", JSON.stringify({ ...exportConfig, appearance: documentAppearance }));
   }, [exportConfig, documentAppearance]);
+  useEffect(() => {
+    let handled = false;
+    const receiveExtensionImport = (event: MessageEvent) => {
+      if (handled || event.source !== window || event.origin !== window.location.origin || event.data?.type !== extensionImportEvent) return;
+      handled = true;
+      const detail = event.data.detail as { ok?: boolean; payload?: unknown; error?: unknown } | undefined;
+      if (!detail?.ok) {
+        setError(typeof detail?.error === "string" ? detail.error : "The browser extension handoff could not be read.");
+        setStatus("error");
+        return;
+      }
+      const imported = conversationFromExtension(detail.payload);
+      if (!imported) {
+        setError("The browser extension sent an invalid or unsupported conversation payload.");
+        setStatus("error");
+        return;
+      }
+      const importedExchanges = groupConversationExchanges(imported.messages);
+      if (!importedExchanges.length) {
+        setError("The rendered page did not contain a complete question-and-answer exchange.");
+        setStatus("error");
+        return;
+      }
+      setError("");
+      setUrl("");
+      setConversation(imported);
+      setSelectedExchangeIds(importedExchanges.map((exchange) => exchange.id));
+      setImportStage("ready");
+      setStatus("ready");
+      requestAnimationFrame(() => document.querySelector("#preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    };
+    window.addEventListener("message", receiveExtensionImport);
+    return () => window.removeEventListener("message", receiveExtensionImport);
+  }, []);
   useEffect(() => {
     if (!selectedMessages.length || !previewRef.current) { setPreviewPages([]); setPreviewTotalPages(0); return; }
     let cancelled = false;

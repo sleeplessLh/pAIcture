@@ -298,8 +298,8 @@ createServer(async (request, response) => {
       const paper = ["a4", "a3", "letter"].includes(body.config?.paper) ? body.config.paper : "a4";
       const orientation = body.config?.orientation === "landscape" ? "landscape" : "portrait";
       const paperFormat = paper === "a3" ? "A3" : paper === "letter" ? "Letter" : "A4";
-      const margin = "21.7mm";
-      const baseGeometry = paper === "a3" ? { width: 1123, height: 1587, margin: 82 } : paper === "letter" ? { width: 816, height: 1056, margin: 82 } : { width: 794, height: 1123, margin: 82 };
+      const margin = "25.4mm";
+      const baseGeometry = paper === "a3" ? { width: 1123, height: 1587, margin: 96 } : paper === "letter" ? { width: 816, height: 1056, margin: 96 } : { width: 794, height: 1123, margin: 96 };
       const geometry = orientation === "landscape" ? { width: baseGeometry.height, height: baseGeometry.width, margin: baseGeometry.margin } : baseGeometry;
       const composition = [1, 2, 4].includes(body.config?.composition) ? body.config.composition : 1;
       const slices = Array.isArray(body.config?.slices) ? body.config.slices
@@ -329,11 +329,10 @@ createServer(async (request, response) => {
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           document.documentElement.dataset.exportReady = "true";
         });
-        // 1-in-1 can use Chromium's native fragmentation directly. Building a
-        // separate clone of the complete conversation for every logical page
-        // multiplied a 24-page image-heavy document into hundreds of DOM/image
-        // instances and made page.pdf() take roughly 96 seconds on mobile jobs.
-        if (slices.length && composition > 1) {
+        // Compose every logical page explicitly. Chromium's native flow can
+        // visually collapse the top margin on continuation pages, so 1-in-1
+        // must use the same deterministic page windows as N-in-1 output.
+        if (slices.length) {
           const layoutMetrics = await page.evaluate(({ slices, sourceHeight, composition, geometry, orientation }) => {
             const source = document.querySelector(".conversation-document");
             if (!(source instanceof HTMLElement)) throw new Error("EXPORT_DOCUMENT_NOT_FOUND");
@@ -442,7 +441,7 @@ createServer(async (request, response) => {
             await document.fonts.ready;
             await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           });
-        } else console.info("[PDF] Native 1-in-1 pagination", { clientLogicalPages: slices.length });
+        } else console.info("[PDF] No client pagination slices supplied");
         await page.emulateMedia({ media: "print" });
         const pdfStartedAt = Date.now();
         const pdf = await page.pdf({
