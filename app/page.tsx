@@ -150,8 +150,7 @@ function downloadBlob(blob: Blob, filename: string) {
   // the native Share Sheet and Save to Files actions.
   if (isIosBrowser()) {
     window.location.assign(href);
-    window.setTimeout(() => URL.revokeObjectURL(href), 300_000);
-    return;
+    return href;
   }
   const link = document.createElement("a");
   link.href = href;
@@ -160,7 +159,7 @@ function downloadBlob(blob: Blob, filename: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  return href;
 }
 
 function exportFilename(title: string) {
@@ -408,6 +407,7 @@ export default function Home() {
   const [exportPhase, setExportPhase] = useState<"idle" | "rendering" | "downloading" | "done" | "error">("idle");
   const [exportDetail, setExportDetail] = useState("");
   const [exportError, setExportError] = useState("");
+  const [readyDownload, setReadyDownload] = useState<{ href: string; filename: string } | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const exportConfig = useMemo<ExportConfig>(() => ({ paper, orientation, composition }), [paper, orientation, composition]);
   const detected = useMemo(() => detectPlatform(url.trim()), [url]);
@@ -417,6 +417,9 @@ export default function Home() {
     [exchanges, selectedExchangeIds],
   );
   const [documentDate] = useState(() => new Intl.DateTimeFormat("en", { year: "numeric", month: "long", day: "numeric" }).format(new Date()));
+
+  useEffect(() => () => { if (readyDownload) URL.revokeObjectURL(readyDownload.href); }, [readyDownload]);
+  useEffect(() => { setReadyDownload(null); setExportPhase("idle"); }, [selectedMessages, format, documentAppearance, exportConfig]);
 
   useEffect(() => {
     const saved = localStorage.getItem("paicture-theme");
@@ -568,7 +571,7 @@ export default function Home() {
         console.info("[EXPORT] PDF Blob generated", { size: blob.size, type: blob.type });
         setExportPhase("downloading");
         setExportDetail("Sending to downloads…");
-        downloadBlob(blob, `${slug}.pdf`);
+        setReadyDownload({ href: downloadBlob(blob, `${slug}.pdf`), filename: `${slug}.pdf` });
         setExportPhase("done");
         setExportDetail("Ready");
         console.info("[EXPORT] Download triggered", { filename: `${slug}.pdf` });
@@ -591,11 +594,11 @@ export default function Home() {
       if (outputs.length === 1) {
         const file = pngFiles[Object.keys(pngFiles)[0]];
         const bytes = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer;
-        downloadBlob(new Blob([bytes], { type: "image/png" }), `${slug}.png`);
+        setReadyDownload({ href: downloadBlob(new Blob([bytes], { type: "image/png" }), `${slug}.png`), filename: `${slug}.png` });
       } else {
         const { zipSync } = await import("fflate");
         const archive = zipSync(pngFiles, { level: 6 });
-        downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${slug}-images.zip`);
+        setReadyDownload({ href: downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${slug}-images.zip`), filename: `${slug}-images.zip` });
       }
       setExportPhase("done");
       setExportDetail("Ready");
@@ -675,7 +678,7 @@ export default function Home() {
               <p className="quality-note"><Check size={13} /> High quality · balanced 1:1 margins</p>
             </div>
           </details>
-          <button type="button" className="export-button" onClick={exportDocument} disabled={exporting || previewRendering || !selectedMessages.length}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? exportDetail || `Building ${format === "pdf" ? "your PDF" : "your images"}…` : exportPhase === "done" ? `Download ${format === "pdf" ? "PDF" : "again"}` : previewRendering ? "Preparing preview…" : `Create ${format === "pdf" ? "PDF" : "PNG images"}`}</button>
+          {readyDownload && exportPhase === "done" ? <a className="export-button" href={readyDownload.href} download={readyDownload.filename}><Download size={18} />Download {format === "pdf" ? "PDF" : "images"}</a> : <button type="button" className="export-button" onClick={exportDocument} disabled={exporting || previewRendering || !selectedMessages.length}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? exportDetail || `Building ${format === "pdf" ? "your PDF" : "your images"}…` : previewRendering ? "Preparing preview…" : `Create ${format === "pdf" ? "PDF" : "PNG images"}`}</button>}
           {exporting && <ProgressJourney stage={exportPhase === "downloading" ? "ready" : "building"} />}{exportError && <p className="export-error" role="alert">{exportError}</p>}<p className="export-status" aria-live="polite">{exportPhase === "done" ? "Your browser download has started." : exporting ? exportDetail || "Keep this tab open while the pages are prepared." : !selectedMessages.length ? "Select content above to enable export." : ""}</p><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p>
         </aside>
       </div></section>
