@@ -1,0 +1,15 @@
+.git/
+.next/
+.vercel/
+.vinext/
+.wrangler/
+dist/
+node_modules/
+output/
+tmp/
+plugin-site/deploy/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
