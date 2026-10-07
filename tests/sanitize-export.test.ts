@@ -18,6 +18,13 @@ test("removes bracketed internal markers conservatively", () => {
   assert.equal(sanitizeForExportHtml("<p>Before [filecite:abc123] after</p>"), "<p>Before  after</p>");
 });
 
+test("removes dangerous link and image protocols from imported HTML", () => {
+  const html = sanitizeForExportHtml('<a href="javascript:alert(1)">bad</a><a href="vbscript:msgbox(1)">worse</a><img src="data:image/svg+xml;base64,PHN2Zz4=" alt="unsafe"><a href="https://example.com">safe</a><img src="data:image/png;base64,iVBORw0KGgo=" alt="safe image">');
+  assert.doesNotMatch(html, /javascript:|vbscript:|svg\+xml/i);
+  assert.match(html, /href="https:\/\/example\.com"/);
+  assert.match(html, /src="data:image\/png;base64,iVBORw0KGgo="/);
+});
+
 test("removes URL serialization wrappers but preserves the readable label and link", () => {
   const input = '<p>来源：\uE200url\uE202OpenAI\uE202<a href="https://openai.com">https://openai.com</a>\uE201</p>';
   const output = sanitizeForExportHtml(input);

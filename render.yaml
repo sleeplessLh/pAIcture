@@ -14,7 +14,7 @@ services:
       - key: CHATGPT_EXTRACTOR_TOKEN
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://paicture.lawrancehii12345.chatgpt.site
+        value: https://paicture.vercel.app
       - key: MAX_CONCURRENT_JOBS
         value: "1"
       - key: MAX_QUEUED_JOBS

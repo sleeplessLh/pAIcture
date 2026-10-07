@@ -17,7 +17,14 @@ export function sanitizeHtml(input: string) {
       if (!allowedTags.has(normalized)) return "";
       if (tag.startsWith("</")) return `</${normalized}>`;
       const safeAttrs = [...String(attrs).matchAll(/([a-z0-9-]+)\s*=\s*("[^"]*"|'[^']*')/gi)]
-        .filter(([, key, value]) => allowedAttributes.has(key.toLowerCase()) && !/javascript:|data:text\/html/i.test(value))
+        .filter(([, key, value]) => {
+          const attribute = key.toLowerCase();
+          if (!allowedAttributes.has(attribute)) return false;
+          const unquoted = value.slice(1, -1).trim().replace(/&colon;/gi, ":");
+          if (attribute === "href") return /^(?:https?:|mailto:|#|\/)/i.test(unquoted);
+          if (attribute === "src") return /^(?:https:|data:image\/(?:png|jpe?g|gif|webp);base64,|\/)/i.test(unquoted);
+          return true;
+        })
         .map(([, key, value]) => ` ${key.toLowerCase()}=${value}`).join("");
       return `<${normalized}${safeAttrs}>`;
     });
