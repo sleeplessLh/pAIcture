@@ -84,7 +84,7 @@ function imageHtml(asset: ResolvedImageAsset, pointer?: string) {
     asset.height ? ` height="${asset.height}"` : "",
   ].join("");
   const pointerAttribute = pointer ? ` data-asset-pointer="${escapeAttribute(pointer)}"` : "";
-  return `<figure class="conversation-image"${pointerAttribute}><img src="${escapeAttribute(asset.src)}" alt="${escapeAttribute(asset.alt || "ChatGPT generated image")}"${dimensions} loading="eager" decoding="async"></figure>`;
+  return `<figure class="conversation-image"${pointerAttribute}><img src="${escapeAttribute(asset.src)}" alt="${escapeAttribute(asset.alt || "Conversation image")}"${dimensions} loading="eager" decoding="async"></figure>`;
 }
 function unavailableImageHtml(pointer?: string) {
   const pointerAttribute = pointer ? ` data-asset-pointer="${escapeAttribute(pointer)}"` : "";

@@ -406,6 +406,9 @@ export default function Home() {
   const [previewTotalPages, setPreviewTotalPages] = useState(0);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [previewRendering, setPreviewRendering] = useState(false);
+  const [previewRenderedSignature, setPreviewRenderedSignature] = useState<object | null>(null);
+  const [previewError, setPreviewError] = useState<{ signature: object; message: string } | null>(null);
+  const [previewRetry, setPreviewRetry] = useState(0);
   const [previewFit, setPreviewFit] = useState<"page" | "width">("width");
   const [exporting, setExporting] = useState(false);
   const [exportPhase, setExportPhase] = useState<"idle" | "rendering" | "downloading" | "done" | "error">("idle");
@@ -420,6 +423,9 @@ export default function Home() {
     () => messagesForSelectedExchanges(exchanges, selectedExchangeIds),
     [exchanges, selectedExchangeIds],
   );
+  const previewSignature = useMemo(() => ({ conversation, selectedMessages, documentAppearance, exportConfig, previewExpanded }), [conversation, selectedMessages, documentAppearance, exportConfig, previewExpanded]);
+  const previewReady = previewRenderedSignature === previewSignature && !previewRendering;
+  const currentPreviewError = previewError?.signature === previewSignature ? previewError.message : "";
   const [documentDate] = useState(() => new Intl.DateTimeFormat("en", { year: "numeric", month: "long", day: "numeric" }).format(new Date()));
 
   useEffect(() => () => { if (readyDownload) URL.revokeObjectURL(readyDownload.href); }, [readyDownload]);
@@ -473,6 +479,7 @@ export default function Home() {
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setPreviewRendering(true);
+      setPreviewError(null);
       setPreviewPages([]);
       try {
         // Preview pixels are display-only. A lower fixed scale keeps every page
@@ -488,12 +495,14 @@ export default function Home() {
         finalPages.forEach((canvas) => { canvas.width = 1; canvas.height = 1; });
         setPreviewTotalPages(totalOutputPages);
         setPreviewPages(previews);
+        setPreviewRenderedSignature(previewSignature);
       } catch (reason) {
         console.error("[PREVIEW] Page rendering failed", reason);
+        if (!cancelled) setPreviewError({ signature: previewSignature, message: "The preview could not be prepared. Try again or choose fewer exchanges." });
       } finally { if (!cancelled) setPreviewRendering(false); }
     }, 260);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [selectedMessages, documentAppearance, exportConfig, composition, previewExpanded]);
+  }, [selectedMessages, documentAppearance, exportConfig, composition, previewExpanded, previewSignature, previewRetry]);
 
   async function processConversation(event: React.FormEvent) {
     event.preventDefault();
@@ -659,11 +668,11 @@ export default function Home() {
       {exchanges.length ? <section className="exchange-selector" aria-labelledby="exchange-selector-title"><div className="exchange-selector-head"><div><h3 id="exchange-selector-title">Choose Q&amp;A exchanges</h3><p><strong>{selectedExchangeIds.length}</strong> of {exchanges.length} selected · Complete answers are always exported.</p></div><div className="exchange-actions"><button type="button" onClick={() => updateSelection(exchanges.map(({ id }) => id))}>Select all</button><button type="button" onClick={() => updateSelection([])}>Clear all</button><button type="button" onClick={() => updateSelection([exchanges.at(-1)!.id])}>Latest only</button></div></div><div className="exchange-list">{exchanges.map((exchange) => { const selected = selectedExchangeIds.includes(exchange.id); return <label className={`exchange-option ${selected ? "selected" : ""}`} key={exchange.id}><input type="checkbox" checked={selected} onChange={() => toggleExchange(exchange)} /><span className="exchange-number">{String(exchange.index).padStart(2, "0")}</span><span className="exchange-copy"><strong>{exchangePreview(exchange.userMessages) || "Question"}</strong><small>{exchangePreview(exchange.assistantMessages) || "Answer"}</small></span><span className="exchange-check" aria-hidden="true">{selected ? <Check size={16} /> : null}</span></label>; })}</div></section> : <div className="selection-warning" role="alert"><strong>No complete Q&amp;A exchange was found.</strong><span>pAIcture will not export the full conversation automatically. Try another complete shared conversation.</span></div>}
       <div className="preview-shell">
         <div className="preview-column">
-          <div className="preview-label"><span className="section-index">02 / Final Preview</span><span>{selectedMessages.length ? `${previewTotalPages || "…"} output ${format === "pdf" ? "page" : "image"}${previewTotalPages === 1 ? "" : "s"} · ${paperSizes[paper].label} ${orientation} · ${composition}-in-1` : "Nothing selected"}</span>{selectedMessages.length ? <span className="preview-fit-controls" aria-label="Preview zoom"><button type="button" className={previewFit === "page" ? "selected" : ""} onClick={() => setPreviewFit("page")}>Fit page</button><button type="button" className={previewFit === "width" ? "selected" : ""} onClick={() => setPreviewFit("width")}>Fit width</button></span> : null}</div>
+          <div className="preview-label"><span className="section-index">02 / Final Preview</span><span>{selectedMessages.length ? `${previewReady ? previewTotalPages : "…"} output ${format === "pdf" ? "page" : "image"}${previewReady && previewTotalPages === 1 ? "" : "s"} · ${paperSizes[paper].label} ${orientation} · ${composition}-in-1` : "Nothing selected"}</span>{selectedMessages.length ? <span className="preview-fit-controls" aria-label="Preview zoom"><button type="button" className={previewFit === "page" ? "selected" : ""} onClick={() => setPreviewFit("page")}>Fit page</button><button type="button" className={previewFit === "width" ? "selected" : ""} onClick={() => setPreviewFit("width")}>Fit width</button></span> : null}</div>
           {selectedMessages.length ? <>
             <div className="export-source-host" aria-hidden="true"><ConversationDocument ref={previewRef} title={conversation.title} platformName={platforms[conversation.platform].name} messages={selectedMessages} dateLabel={documentDate} appearance={documentAppearance} /></div>
             <div className={`page-preview-stage fit-${previewFit}`}>
-              {previewRendering ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the final pages…</strong></div> : <><div className="page-preview-list">{previewPages.map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>{format === "pdf" ? "Output page" : "Image"} {index + 1}</figcaption><img src={src} alt={`Final ${format === "pdf" ? "PDF page" : "PNG image"} ${index + 1}`} /></figure>)}</div>{previewTotalPages > 3 ? <button type="button" className="preview-page-toggle" aria-expanded={previewExpanded} onClick={() => setPreviewExpanded((expanded) => !expanded)}>{previewExpanded ? "Collapse to first 3 pages" : `Expand all ${previewTotalPages} pages`}</button> : null}</>}
+              {currentPreviewError ? <div className="preview-rendering" role="alert"><strong>{currentPreviewError}</strong><button type="button" onClick={() => { setPreviewError(null); setPreviewRetry((retry) => retry + 1); }}>Try preview again</button></div> : !previewReady ? <div className="preview-rendering"><LoaderCircle className="spin" /><strong>Arranging the final pages…</strong></div> : <><div className="page-preview-list">{previewPages.map((src, index) => <figure className="page-preview" key={`${src.slice(-32)}-${index}`}><figcaption>{format === "pdf" ? "Output page" : "Image"} {index + 1}</figcaption><img src={src} alt={`Final ${format === "pdf" ? "PDF page" : "PNG image"} ${index + 1}`} /></figure>)}</div>{previewTotalPages > 3 ? <button type="button" className="preview-page-toggle" aria-expanded={previewExpanded} onClick={() => setPreviewExpanded((expanded) => !expanded)}>{previewExpanded ? "Collapse to first 3 pages" : `Expand all ${previewTotalPages} pages`}</button> : null}</>}
             </div>
           </> : <div className="empty-preview"><EmptyDocumentVisual /><strong>Your conversation will appear here.</strong><span>Select at least one Q&amp;A exchange to build the preview.</span></div>}
         </div>
@@ -682,7 +691,7 @@ export default function Home() {
               <p className="quality-note"><Check size={13} /> High quality · balanced 1:1 margins</p>
             </div>
           </details>
-          {readyDownload && exportPhase === "done" ? <a className="export-button" href={readyDownload.href} download={readyDownload.filename}><Download size={18} />Download {format === "pdf" ? "PDF" : "images"}</a> : <button type="button" className="export-button" onClick={exportDocument} disabled={exporting || previewRendering || !selectedMessages.length}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? exportDetail || `Building ${format === "pdf" ? "your PDF" : "your images"}…` : previewRendering ? "Preparing preview…" : `Create ${format === "pdf" ? "PDF" : "PNG images"}`}</button>}
+          {readyDownload && exportPhase === "done" && previewReady ? <a className="export-button" href={readyDownload.href} download={readyDownload.filename}><Download size={18} />Download {format === "pdf" ? "PDF" : "images"}</a> : <button type="button" className="export-button" onClick={exportDocument} disabled={exporting || !previewReady || !selectedMessages.length}>{exporting ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />}{exporting ? exportDetail || `Building ${format === "pdf" ? "your PDF" : "your images"}…` : !previewReady ? "Preparing preview…" : `Create ${format === "pdf" ? "PDF" : "PNG images"}`}</button>}
           {exporting && <ProgressJourney stage={exportPhase === "downloading" ? "ready" : "building"} />}{exportError && <p className="export-error" role="alert">{exportError}</p>}<p className="export-status" aria-live="polite">{exportPhase === "done" ? "Your browser download has started." : exporting ? exportDetail || "Keep this tab open while the pages are prepared." : !selectedMessages.length ? "Select content above to enable export." : ""}</p><p className="privacy-note"><ShieldCheck size={15} />Your imported content is not saved to a public library.</p>
         </aside>
       </div></section>
