@@ -12,6 +12,11 @@ const layoutSource = readFileSync(new URL("../app/layout.tsx", import.meta.url),
 const themeSource = readFileSync(new URL("../lib/document-theme.ts", import.meta.url), "utf8");
 const adapterSource = readFileSync(new URL("../lib/conversation/adapters.ts", import.meta.url), "utf8");
 
+test("share-link guidance points to the whole-conversation menu", () => {
+  assert.match(pageSource, /top-right ⋯ menu → Share → Create link → Copy link/);
+  assert.match(pageSource, /Don’t use the ⋯ below an individual exchange/);
+});
+
 test("changing export settings hides stale Preview pages and disables export until they refresh", () => {
   assert.match(pageSource, /previewRenderedSignature === previewSignature && !previewRendering/);
   assert.match(pageSource, /setPreviewRenderedSignature\(previewSignature\)/);
