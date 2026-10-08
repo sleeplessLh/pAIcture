@@ -50,6 +50,8 @@ test("image-heavy imports resolve assets concurrently within cold-start timeouts
   assert.match(extractorSource, /mapWithConcurrency\(renderedImages, 4/);
   assert.match(importRoute, /AbortSignal\.timeout\(112_000\)/);
   assert.match(pageSource, /controller\.abort\(\), 125_000/);
+  assert.match(extractorSource, /pointers\.length >= 8 && unresolvedPointers\.length === 1/);
+  assert.match(extractorSource, /Skipping browser recovery for one unresolved asset/);
 });
 
 test("iOS receives the completed file without suspending export in a blank tab", () => {

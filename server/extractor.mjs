@@ -165,6 +165,16 @@ async function resolveSharedImages(target, html, cookieHeader = "") {
   if (Object.keys(directAssets).length === pointers.length) {
     return { assets: directAssets, warnings: [] };
   }
+  // A single unavailable image in an otherwise image-heavy share must not
+  // hold the entire conversation behind a slow browser recovery attempt.
+  const unresolvedPointers = pointers.filter((pointer) => !directAssets[pointer]);
+  if (pointers.length >= 8 && unresolvedPointers.length === 1) {
+    console.warn("[IMAGE] Skipping browser recovery for one unresolved asset", { resolved: pointers.length - 1 });
+    return {
+      assets: directAssets,
+      warnings: ["1 shared image could not be retrieved from the public conversation."],
+    };
+  }
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
