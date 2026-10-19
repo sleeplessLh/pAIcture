@@ -6,7 +6,6 @@
   "author": { "name": "pAIcture" },
   "homepage": "https://paicture-plugin.lawrancehii12345.chatgpt.site",
   "repository": "https://github.com/sleeplessLh/pAIcture",
-  "license": "MIT",
   "keywords": ["chatgpt", "pdf", "conversation", "export"],
   "extensions": {
     "com.openai": {

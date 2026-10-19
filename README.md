@@ -4,7 +4,6 @@ pAIcture turns a public ChatGPT shared conversation into a selectable, paginated
 
 [![Live](https://img.shields.io/badge/live-paicture.vercel.app-ff7657?style=for-the-badge)](https://paicture.vercel.app)
 [![Next.js](https://img.shields.io/badge/Next.js-16-111111?style=for-the-badge&logo=nextdotjs)](https://nextjs.org/)
-[![License](https://img.shields.io/badge/license-MIT-6b78d6?style=for-the-badge)](LICENSE)
 
 **[Open the live app →](https://paicture.vercel.app)**
 
@@ -152,4 +151,4 @@ git switch -c codex/rollback-stable-pre-production stable-pre-production
 
 ## License
 
-Licensed under the [MIT License](LICENSE).
+This repository does not currently provide a license for pAIcture's original source code. Third-party components retain their separate license notices.
